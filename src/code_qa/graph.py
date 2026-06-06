@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import operator
-from typing import Annotated, Literal, Optional, TypedDict
+from typing import Annotated, Literal, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
@@ -39,23 +39,27 @@ ROUTER_PERSONA = (
 )
 
 ROUTER_DECIDE_SYSTEM = ROUTER_PERSONA + "\n\n" + (
-    "Decide the next step for the user's latest message:\n"
-    "- answer: you can answer from the conversation + overview (or fetched context) already — put it in `message`.\n"
-    "- clarify: the request is ambiguous IN THE CONTEXT OF THIS REPO (e.g. several things named 'auth') —\n"
-    "  ask ONE short clarifying question in `message`.\n"
-    "- fetch_context: you need to see some code before you can answer or decide — put a search/symbol\n"
-    "  query in `query`; a retriever fetches it and you decide again.\n"
-    "- locate: WHERE/HOW a specific thing is implemented -> a retriever. Put a self-contained question in `query`.\n"
+    "Choose ONE next step for the user's latest message and always give a one-sentence `reason`:\n"
+    "- answer: you can already answer from the conversation, overview, or context you fetched — put it in `message`.\n"
+    "- clarify: ambiguous IN THIS REPO (e.g. several things named 'auth') — ask ONE short question in `message`.\n"
+    "- locate: WHERE/HOW one specific thing is implemented -> a retriever. Put a self-contained question in `query`.\n"
     "- summarize: a high-level overview of the whole repository.\n"
-    "- trace: the FLOW / call chain of an operation -> the researcher. Put a self-contained question in `query`.\n"
+    "- trace: a FLOW / call chain, OR any comparison or 'how does X differ from Y' / multi-thread question.\n"
+    "  The researcher fans out to PARALLEL retrievers and synthesizes — route here and let it; do NOT gather the\n"
+    "  pieces yourself. Put a self-contained question in `query`.\n"
+    "- fetch_context: ONLY to answer a small, specific factual question yourself — peek at a little code, then\n"
+    "  answer next turn. It is NOT for gathering broad context and NOT a way to 'prepare' before routing; if the\n"
+    "  question needs real investigation, pick locate or trace directly.\n"
     "Resolve references ('it', 'the first one') from the conversation when writing `query`.\n"
-    "Prefer answering or routing over fetching; fetch only when you genuinely need to see code to proceed."
+    "Examples: \"what does this repo do\" -> summarize; \"where is X handled\" -> locate; \"how does signing\n"
+    "differ across PE/MSI/KMS\" -> trace; \"what type does foo() return\" -> fetch_context then answer."
 )
 
 ROUTER_PRESENT_SYSTEM = ROUTER_PERSONA + "\n\n" + (
-    "Present the worker's results as the answer to the user's CURRENT question. Ground every code claim\n"
-    "in the provided results and cite `file:line`. If the results are weak or empty, say what was and\n"
-    "wasn't found. Do not invent files, paths, or behavior."
+    "Present the worker's results as the answer to the user's CURRENT question. Ground every code claim in\n"
+    "the provided results and cite `file:line`. Give the best answer the results support and state any gaps\n"
+    "plainly — do NOT ask the user to narrow their question or re-ask about specifics (routing already\n"
+    "happened). Do not invent files, paths, or behavior."
 )
 
 ROUTER_CHATONLY = ROUTER_PERSONA + "\n\nNo repository is loaded; answer general/capability questions briefly, or ask the user to load one."
@@ -67,7 +71,7 @@ class RouterDecision(BaseModel):
     action: Literal["answer", "clarify", "fetch_context", "locate", "summarize", "trace"]
     message: str = Field(default="", description="Answer to the user, or the clarifying question.")
     query: str = Field(default="", description="Self-contained worker question, or what code to fetch.")
-    reason: Optional[str] = None
+    reason: str = Field(description="One sentence on why you chose this action (always fill this in).")
 
 
 class GraphState(TypedDict, total=False):
@@ -127,21 +131,29 @@ def build_graph(settings: Settings, factory: ModelFactory, retrieval: Retrieval 
                     "trace": [{"agent": "router", "event": "decision", "action": "answer", "reason": "no repo"}]}
 
         fetched = state.get("context", [])
+        at_budget = len(fetched) >= settings.max_context_fetches
         ctx_block = ("\n\nCode context you fetched so far:\n" + "\n\n".join(fetched)) if fetched else ""
+        budget_note = (
+            "\n\nYou have used ALL your context fetches; fetch_context is no longer allowed — "
+            "choose answer, clarify, locate, summarize, or trace now."
+            if at_budget else
+            f"\n\n(you may fetch_context at most {settings.max_context_fetches - len(fetched)} more "
+            "time(s), and only to answer a small question yourself; prefer routing.)"
+        )
         sys = (ROUTER_DECIDE_SYSTEM
                + f"\n\nRepository overview:\n{retrieval.overview[:1200]}"
                + f"\n\nConversation so far:\n{_render_history(history)}"
-               + ctx_block
-               + f"\n\n(you have fetched code {len(fetched)} time(s); max {settings.max_context_fetches})")
+               + ctx_block + budget_note)
         decision = router.with_structured_output(RouterDecision).invoke(
             [SystemMessage(content=sys), HumanMessage(content=question)]
         )
-        action = decision.action
-        if action == "fetch_context" and len(fetched) >= settings.max_context_fetches:
-            action = "locate"  # budget exhausted -> retrieve and present rather than loop
-        out: dict = {"action": action, "query": decision.query or question,
-                     "trace": [{"agent": "router", "event": "decision", "action": action,
-                                "query": decision.query, "reason": decision.reason or ""}]}
+        action, query, reason = decision.action, decision.query or question, decision.reason or ""
+        if action == "fetch_context" and at_budget:
+            # still wants code after spending the budget -> let the researcher investigate the whole question
+            action, query, reason = "trace", question, "fetch budget exhausted; routing to the researcher"
+        out: dict = {"action": action, "query": query,
+                     "trace": [{"agent": "router", "event": "decision",
+                                "action": action, "query": query, "reason": reason}]}
         if action in ("answer", "clarify"):
             out["answer"] = decision.message or "How can I help with this codebase?"
         return out

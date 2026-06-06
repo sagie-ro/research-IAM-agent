@@ -338,6 +338,9 @@ that's expected and swappable via config when more Azure deployments exist.
 - **D14** **Router is one brain.** A single context-aware `router_decision` makes all lightweight decisions
   (scope reasoning, **clarify**, intent, **fetch_context**) with the conversation in view; all router-side
   steps (decision + every presentation) share one persona + history. Nodes stay split for clarity only.
+  `fetch_context` is a **narrow peek to answer a small question** — never a way to gather breadth or
+  "prepare" before routing; comparison / flow / multi-thread questions route straight to `trace` so the
+  **researcher** fans out. Budget-exhausted `fetch_context` coerces to `trace` on the whole question.
 - **D15** **Researcher is a pure reasoner** — it plans over the structural tools and **delegates all
   code-reading/searching to retriever workers** (`spawn_retrievers`); it has no `read_file`/`search_lexical`.
   Clean tier separation: Opus reasons, Sonnet fetches.
