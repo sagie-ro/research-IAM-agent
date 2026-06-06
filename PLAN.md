@@ -1,6 +1,6 @@
 # Code-Q&A Agent — Project Plan (living document)
 
-**Status:** design v3 — pending approval to start Inc 0
+**Status:** design v3.1 — locked; ready to start Inc 0
 **Branch:** `claude/cool-curie-yyEpt`
 **Last updated:** 2026-06-06
 
@@ -41,7 +41,7 @@ CLI. Three question shapes to serve:
 - The three modes: locate, summarize, trace.
 - Grounded answers with `file:line` citations + corpus-boundary awareness (in-repo vs. third-party).
 - Read-only static analysis; SHA-keyed incremental index.
-- Multi-agent orchestration with per-role model modularity (Azure default).
+- Multi-agent orchestration with per-role model modularity (Anthropic tiers local-first; Azure alternate).
 - Eval harness + full reasoning trace.
 - Scope-guard + abuse resistance.
 
@@ -58,6 +58,7 @@ CLI. Three question shapes to serve:
 - More languages (drop in a Language Profile); **HTML report skill** (router-side presentation).
 - **HITL learning loop** (researcher learns from human-review outcomes).
 - Heavier knowledge-graph / higher-precision resolution (see §5; future research).
+- **Alternative vector store** (e.g. Chroma) — evaluate single-file-index vs. separate-store tradeoff.
 - Web/IDE front-ends; server mode; distributed vector store.
 - Expanded professional-corpus RAG + web-search grounding.
 - External tracing (LangSmith / Datadog).
@@ -99,7 +100,7 @@ CLI. Three question shapes to serve:
                         question │   final NL answer │ (+ file:line citations)
                                  ▼                 │
    ┌──────────────────────────────────────────────────────────────────────────┐
-   │  CONVERSATION ROUTER  ·  lightweight LLM                                   │
+   │  CONVERSATION ROUTER  ·  lightweight LLM (Haiku 4.5)                        │
    │  scope-guard → intent → route → COMPILE final answer (NL → user)           │
    │  the ONLY agent that speaks NL to the user; assembles workers' findings    │
    └──┬────▲──────────────────────────────────────────────┬────▲───────────────┘
@@ -109,12 +110,13 @@ CLI. Three question shapes to serve:
       ▼    │                                               ▼    │
    ┌─────────────────────────────┐   team: dispatch ↕   ┌──────────────────────────┐
    │  RETRIEVER WORKERS          │◄────  findings   ────►│  RESEARCHER · heavy LLM   │
-   │  mid LLM · ×N parallel      │                       │  structured I/O           │
-   │  structured I/O · locate /  │                       │  plans · reasons ·        │
-   │  map / connect              │                       │  synthesizes conclusions  │
-   │  spawned by Router OR       │                       │  raises HITL when stuck   │
-   │  Researcher; findings go    │                       └──────┬───────────┬───────┘
-   │  back to whoever spawned    │                              │ RAG       │ web (budgeted,
+   │  mid LLM (Sonnet 4.6) ·×N   │                       │  (Opus 4.8)               │
+   │  structured I/O · locate /  │                       │  structured I/O           │
+   │  map / connect              │                       │  plans · reasons ·        │
+   │  spawned by Router OR       │                       │  synthesizes conclusions  │
+   │  Researcher; findings go    │                       │  raises HITL when stuck   │
+   │  back to whoever spawned    │                       └──────┬───────────┬───────┘
+   │                             │                              │ RAG       │ web (budgeted,
    └─────────────┬───────────────┘                              ▼           ▼  via retriever)
                  │ call tools                            ┌────────────┐ ┌──────────┐
                  ▼                                       │PROFESSIONAL│ │   WEB    │
@@ -131,7 +133,7 @@ CLI. Three question shapes to serve:
    │  INDEX · on-disk SQLite · keyed by commit SHA · delta via `git diff`         │
    │   [Symbol Graph]  [Call-Paths]  [Embeddings]  [Repo Map]  [Doc Inventory]    │
    │   nodes+edges:    precomputed   vectors       tree+entry  README/docs        │
-   │   calls/imports/  traces from   (ada-2)       points      comments           │
+   │   calls/imports/  traces from   (local)       points      comments           │
    │   extends/impl    entry points                                               │
    └──────────────────────▲─────────────────────────────────────────────────────┘
                           │ build: tree-sitter + hand-rolled resolution (Option A)
@@ -146,7 +148,8 @@ CLI. Three question shapes to serve:
 
    CROSS-CUTTING
    ├─ LLM PROVIDER LAYER · LangChain init_chat_model · per-role model/provider
-   │     default Azure OpenAI: GPT-4o (chat) + text-embedding-ada-002, AD-token auth
+   │     local-first = Anthropic tiers: router·Haiku 4.5  retriever·Sonnet 4.6  researcher·Opus 4.8
+   │     alternate = Azure OpenAI (GPT-4o) · embeddings = separate provider (local / ada-2 / Voyage)
    ├─ TRACING · local structured trace (JSONL): route → tools → reasoning → answer
    │     [future: LangSmith / Datadog]
    ├─ HITL · LangGraph interrupt + checkpointer → human review queue (learning = future)
@@ -164,7 +167,8 @@ CLI. Three question shapes to serve:
     inherits/implements). Hand-rolled cross-file resolution (Option A, §5).
   - **Call-Paths** — precomputed traces from entry points (the GitNexus "Processes" idea) so Trace
     questions are a lookup + agentic gap-bridging, not N hops from scratch.
-  - **Embeddings** — symbol-aware chunks + doc chunks in a `VectorStore` (default SQLite+cosine; swappable).
+  - **Embeddings** — symbol-aware chunks + doc chunks in a `VectorStore` (SQLite via `sqlite-vec`,
+    unified with the graph in one file; swappable). **Optional** — see §7.
   - **Repo Map** — tree, detected entry points, dir/module roles.
   - **Doc Inventory** — README/docs/comments (privileged for Summarize).
 - **Toolbox** (LangChain tools over the index, one `Retriever` interface):
@@ -188,7 +192,12 @@ CLI. Three question shapes to serve:
   - **Handoffs are typed** (Pydantic schemas) everywhere; only the router's user-facing message is NL.
 - **Conversation/state** — multi-turn REPL; session state = history + a **working set** of retrieved
   symbols/files so follow-ups are cheap. LangGraph checkpointer persists state (also enables HITL).
-- **LLM provider layer** — LangChain `init_chat_model`; per-role model/provider binding; Azure default.
+- **LLM provider layer** — LangChain `init_chat_model`; per-role model/provider binding. **Local-first
+  default = Anthropic** (router=Haiku 4.5, retriever=Sonnet 4.6, researcher=Opus 4.8, via
+  `ANTHROPIC_API_KEY`); **Azure OpenAI = alternate** (wraps the boilerplate's AD token provider).
+  Embeddings use a **separate** provider (Anthropic ships none): local code embedder by default, Azure
+  ada-2 or Voyage optional; **semantic retrieval is optional** and falls back to lexical+structural if no
+  embedder is configured.
 - **Caching & delta** — index persisted per (repo, SHA); on re-open, `git diff old..new` → re-parse only
   changed files, patch the graph + re-embed changed chunks; map diff → impacted symbols/call-paths.
 - **Tracing & Eval** — see §9.
@@ -218,33 +227,43 @@ CLI. Three question shapes to serve:
 |---|---|
 | Packaging | **UV** |
 | Orchestration | **LangGraph + LangChain** (model-agnostic) |
-| Config | **Python** (typed settings module); **secrets via `.env`** (per Azure boilerplate) |
-| Index store | **SQLite** (symbol graph + call-paths + vectors) |
+| Config | **Python** (typed settings module); **secrets via `.env`** (`ANTHROPIC_API_KEY`; Azure boilerplate vars) |
+| Index store | **SQLite** (symbol graph + call-paths + vectors via `sqlite-vec`; Chroma = future option) |
 | Lexical search | **ripgrep** |
-| LLM / embeddings | **Azure OpenAI** — GPT-4o (chat) + text-embedding-ada-002, AD-token auth (boilerplate) |
+| Chat LLM | **Local-first: Anthropic** — router=Haiku 4.5 · retriever=Sonnet 4.6 · researcher=Opus 4.8. **Alternate: Azure OpenAI** (GPT-4o, AD-token auth) |
+| Embeddings | **Separate, pluggable provider** (Anthropic has none) — local code embedder (default) · Azure ada-2 · Voyage `voyage-code-3`; **optional** (fallback: lexical+structural) |
 | CLI | prompt_toolkit / rich |
 
 ---
 
 ## 7. Per-role model map
 
-| Role | Default model | Notes |
-|---|---|---|
-| Router | GPT-4o | lightweight prompts; cheapest role |
-| Retriever | GPT-4o | mid; tool-calling worker |
-| Researcher | GPT-4o | heavy reasoning |
-| Embeddings | text-embedding-ada-002 | indexing + semantic retrieval |
+Concrete IDs come from `.env` (e.g. `ROUTER_MODEL` / `RETRIEVER_MODEL` / `RESEARCHER_MODEL` /
+`EMBEDDING_MODEL`) — never hardcoded — so provider/model is swappable per role.
 
-**Honest caveat:** the provided `.env` exposes a single chat deployment (GPT-4o) + ada-2, so today all
-chat roles bind to GPT-4o. The architecture supports true rank-separation (cheaper router, stronger
-researcher) the moment another deployment is added — **config-only change, no code**.
+**Local-first default = Anthropic** (chosen to actually exercise tier separation across roles):
+
+| Role | Tier (default) | Provider | Why |
+|---|---|---|---|
+| Router | Haiku 4.5 | anthropic | lightweight orchestration; cheapest (≈1×) |
+| Retriever | Sonnet 4.6 | anthropic | mid; tool-calling worker (≈3×) |
+| Researcher | Opus 4.8 | anthropic | heavy reasoning (≈5×) |
+| Embeddings | local code embedder | local | offline, no key; or Azure ada-2 / Voyage `voyage-code-3` |
+
+Cost ladder is a clean **1 : 3 : 5** (in/out $/1M) — easy to observe tier effects. Note Haiku's context is
+**200K** vs **1M** for Sonnet/Opus; fine for the router (it orchestrates, doesn't hold big evidence).
+
+**Alternate = Azure OpenAI** (the boilerplate): one chat deployment (GPT-4o) + ada-2. On the Azure path all
+three chat roles collapse to GPT-4o — i.e. **tier separation only exists on the Anthropic path** today;
+that's expected and swappable via config when more Azure deployments exist.
 
 ---
 
 ## 8. Roadmap (increments may merge)
 
-- **Inc 0 — Skeleton.** UV project, Python config + `.env`, LangChain model factory (per-role, Azure AD
-  auth), `RepoSource` (local + clone), minimal LangGraph = router node + scope-guard + smoke round-trip.
+- **Inc 0 — Skeleton.** UV project, Python config + `.env`, LangChain per-role model factory (default
+  Anthropic tiers via `ANTHROPIC_API_KEY`; Azure path wraps the boilerplate's AD token provider),
+  `RepoSource` (local + clone), minimal LangGraph = router node + scope-guard + smoke round-trip.
 - **Inc 1 — Structural index.** tree-sitter profiles (py+java) → SQLite symbol graph + call-paths + repo
   map + doc inventory; SHA cache. `inspect` command dumps stats.
 - **Inc 2 — Toolbox + retriever + router fast-path → Locate (Q1).** Seed eval + reasoning trace.
@@ -276,17 +295,25 @@ researcher) the moment another deployment is added — **config-only change, no 
 - **D3** Multi-agent (LangGraph): lightweight **router** / mid **retriever(s)** / heavy **researcher**;
   team topology (router *and* researcher can spawn retrievers; retrievers report back to dispatcher).
   All findings/reports flow **back up to the router**, which compiles the single user-facing answer.
-- **D4** Per-role model modularity via LangChain; **Azure default** (GPT-4o + ada-2).
+- **D4** Per-role model modularity via LangChain. **Local-first default = Anthropic tiers**
+  (router=Haiku 4.5 · retriever=Sonnet 4.6 · researcher=Opus 4.8) to exercise true tier separation;
+  **Azure OpenAI = alternate** (GPT-4o + ada-2).
 - **D5** **UV** packaging; **Python config**; secrets via `.env`.
 - **D6** **Local-first structured tracing**; LangSmith/Datadog = future.
 - **D7** Precompute **call-paths**; delta via **git-diff → impact**.
 - **D8** **Structured agent outputs** everywhere except the router's user-facing answer.
 - **D9** Toolbox includes **`get_references`** (usage sites of a symbol).
+- **D10** Embeddings via a **separate, pluggable provider** (Anthropic ships none): default = local code
+  embedder for the Anthropic-local phase; Azure ada-2 / Voyage optional. **Semantic retrieval is optional**
+  — falls back to lexical+structural when no embedder is configured.
+- **D11** Vector store stays **SQLite** (unified single-file index via `sqlite-vec`); Chroma evaluated and
+  **deferred to future dev** (single-file-index vs. separate-store tradeoff).
 
 ## 11. Assumptions log
 
-- **A1** Azure creds provided locally via `.env`; only GPT-4o (chat) + ada-2 (embeddings) available.
-- **A2** Outbound network available for `git clone` + Azure (clone verified working).
+- **A1** Local-first creds = `ANTHROPIC_API_KEY` (chat tiers Haiku/Sonnet/Opus); Azure creds
+  (GPT-4o + ada-2) available as the alternate. Anthropic provides **no** embeddings model.
+- **A2** Outbound network available for `git clone` + the chosen LLM provider (clone verified working).
 - **A3** Single target repo per session; Python/Java only for v1.
 - **A4** Professional-corpus RAG is user-supplied and optional (empty by default).
 - **A5** Repo pinned at a commit SHA for reproducibility/delta.
