@@ -1,7 +1,7 @@
 # Code-Q&A Agent — Project Plan (living document)
 
-**Status:** design v3.1 — locked; Inc 0–4 + multi-turn chat + eval metrics (Inc 7) implemented
-(locate · summarize · trace · conversational router · recall/groundedness/judge eval)
+**Status:** design v3.1 — locked; Inc 0–4 + multi-turn chat + eval metrics + router-brain refactor
+(locate · summarize · trace · router that can clarify & fetch context · researcher delegates · eval)
 **Branch:** `claude/cool-curie-yyEpt`
 **Last updated:** 2026-06-06
 
@@ -182,15 +182,17 @@ CLI. Three question shapes to serve:
   A **context assembler** expands from seeds along graph edges to return *connected* sets (not independent
   top-k), with dedup/diversity + token budget.
 - **Agent graph (LangGraph) — works like a team:**
-  - **Conversation Router** (lightweight LLM) — owns the conversation; scope-guard / abuse filter; intent
-    classify; route to workers; **receives their structured findings back and COMPILES the single
-    user-facing NL answer**. Has **fast paths**: trivial/locate → router → a single retriever → (findings
-    back) → answer, *without* waking the researcher (cost ∝ difficulty).
+  - **Conversation Router** (lightweight LLM) — owns the conversation and is the only NL voice. ONE
+    context-aware decision (`router_decision`) chooses to answer directly, **ask a clarifying question**,
+    **fetch code context first** (via a retriever, bounded by `max_context_fetches`), or route to a worker;
+    it then **presents** every worker result as the single user-facing answer. All router steps share one
+    persona + the conversation (D14).
   - **Retriever workers** (mid LLM, ×N parallel) — wield the toolbox; produce **structured findings**;
     **spawnable by the router OR the researcher**, and hand findings back to whoever dispatched them
     (router or researcher).
-  - **Researcher** (heavy LLM) — deep reasoning + **structured conclusions**; orchestrates retrievers as a
-    team (back-and-forth, parallel fan-out); optional RAG over a user-fed professional corpus; budgeted web
+  - **Researcher** (heavy LLM) — a **pure reasoner that delegates code-reading to retrievers** (no
+    `read_file`/`search_lexical`; D15); deep reasoning + **structured conclusions**; orchestrates retrievers
+    as a team (back-and-forth, parallel fan-out); optional RAG over a user-fed professional corpus; budgeted web
     search (executed via a retriever); raises a **HITL interrupt** with a structured report when
     inconclusive; **returns a structured report up to the router** for final presentation.
   - **Handoffs are typed** (Pydantic schemas) everywhere; only the router's user-facing message is NL.
@@ -205,6 +207,22 @@ CLI. Three question shapes to serve:
 - **Caching & delta** — index persisted per (repo, SHA); on re-open, `git diff old..new` → re-parse only
   changed files, patch the graph + re-embed changed chunks; map diff → impacted symbols/call-paths.
 - **Tracing & Eval** — see §9.
+
+### 4.3 Graph nodes (LangGraph)
+
+Nodes exist for graph clarity, but every **router-side** node is one brain: the same router model +
+`ROUTER_PERSONA` + the conversation history (no isolated per-node personas).
+
+| node | model | role |
+|---|---|---|
+| `scope_guard` | — (regex) | deterministic abuse / prompt-injection / resource pre-filter |
+| `router_decision` | router (Haiku) | the brain: one context-aware call → `answer · clarify · fetch_context · locate · summarize · trace`; can ask the user to clarify, or fetch code first |
+| `fetch_context` | retriever (Sonnet) | fetch the code the router asked for, then loop back to `router_decision` (≤ `max_context_fetches`) |
+| `retrieve` | retriever (Sonnet) | locate worker: toolbox loop → structured `Findings` |
+| `research` | researcher (Opus) + retrievers | trace: plans + delegates code-reading to parallel `retriever#N` → `TraceReport` |
+| `present_locate` / `present_trace` / `present_summary` | router (Haiku) | the router presents the worker's results (or the structure digest) as the single user-facing answer |
+
+Flow: `scope_guard → router_decision → { answer|clarify ⇒ end · fetch_context ↺ · retrieve→present_locate · research→present_trace · summarize⇒present_summary }`.
 
 ---
 
@@ -317,6 +335,12 @@ that's expected and swappable via config when more Azure deployments exist.
   `git ls-tree`). Reading binary *contents* is out of scope. Plain-clone fallback for older git.
 - **D13** Every reasoning-trace event is attributed to an **agent/instance** (e.g. `router`, `retriever#1`)
   to keep multi-agent flows legible — important once the researcher fans out to parallel retrievers.
+- **D14** **Router is one brain.** A single context-aware `router_decision` makes all lightweight decisions
+  (scope reasoning, **clarify**, intent, **fetch_context**) with the conversation in view; all router-side
+  steps (decision + every presentation) share one persona + history. Nodes stay split for clarity only.
+- **D15** **Researcher is a pure reasoner** — it plans over the structural tools and **delegates all
+  code-reading/searching to retriever workers** (`spawn_retrievers`); it has no `read_file`/`search_lexical`.
+  Clean tier separation: Opus reasons, Sonnet fetches.
 
 ## 11. Assumptions log
 

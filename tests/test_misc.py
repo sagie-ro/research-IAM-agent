@@ -33,8 +33,9 @@ def test_graph_blocked_path_is_keyless():
     assert result["trace"] and result["trace"][0]["agent"] == "router"
 
 
-def test_graph_has_all_strategy_nodes():
+def test_graph_has_all_nodes():
     settings = Settings()
     graph = build_graph(settings, ModelFactory(settings), retrieval=None)
     nodes = set(graph.get_graph().nodes)
-    assert {"retrieve", "summarize", "research", "compile_trace"} <= nodes
+    assert {"scope_guard", "router_decision", "fetch_context", "retrieve", "research",
+            "present_locate", "present_trace", "present_summary"} <= nodes

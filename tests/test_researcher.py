@@ -27,6 +27,17 @@ def test_fan_out_caps_parallelism():
     assert len(workers) == 2  # capped
 
 
+def test_researcher_delegates_reading(toolbox):
+    from code_qa.retrieval import make_tools
+    from code_qa.retrieval.researcher import _DELEGATED
+
+    names = {t.name for t in make_tools(toolbox)}
+    assert {"read_file", "search_lexical"} <= names          # the full toolbox has them
+    planning = names - _DELEGATED                            # what the researcher keeps (pre-spawn_retrievers)
+    assert "read_file" not in planning and "search_lexical" not in planning
+    assert {"get_call_path", "structure_digest", "find_implementations"} <= planning
+
+
 def test_trace_report_schema():
     report = TraceReport(
         summary="signing flow",
