@@ -340,12 +340,13 @@ that's expected and swappable via config when more Azure deployments exist.
   not just commit diffs). Implemented Inc 6 (`build_delta`).
 - **D8** **Structured agent outputs** everywhere except the router's user-facing answer.
 - **D9** Toolbox includes **`get_references`** (usage sites of a symbol).
-- **D10** Embeddings via a **separate, pluggable provider** (Anthropic ships none). **Wired: Azure ada-2**
-  (`AzureOpenAIEmbeddings`, same Entra-ID auth as chat) powering **hybrid `search_docs`** (semantic ⊕
-  keyword) over a `doc_vectors` table; local sentence-transformers is an optional extra. **Semantic is
-  additive** — embedded incrementally (only un-embedded chunks), cached in the index, and it **falls back
-  to keyword** when no embedder is configured or a call fails. Brute-force cosine (corpus is small → no
-  `sqlite-vec` needed; D11 store stays single-file SQLite).
+- **D10** Embeddings via a **separate, pluggable provider** (Anthropic ships none), resolved
+  **independently of the chat provider**: if `AZURE_OPENAI_MODEL_ADA2` (+ endpoint) is set it is used
+  **always** (regardless of `EMBEDDING_PROVIDER`/`LLM_PROVIDER`); `EMBEDDING_PROVIDER=none` is the only
+  opt-out; `local` sentence-transformers is the fallback extra. Powers **hybrid `search_docs`** (semantic ⊕
+  keyword) over a `doc_vectors` table; **semantic is additive** — embedded incrementally (only un-embedded
+  chunks), cached in the index, and **falls back to keyword** when unavailable. Brute-force cosine (corpus
+  is small → no `sqlite-vec` needed; D11 store stays single-file SQLite).
 - **D11** Vector store stays **SQLite** (unified single-file index via `sqlite-vec`); Chroma evaluated and
   **deferred to future dev** (single-file-index vs. separate-store tradeoff).
 - **D12** Git ingestion uses a **lean clone** (shallow + blobless `--filter=blob:none` + sparse-checkout to

@@ -52,3 +52,25 @@ def test_build_embedder_none_without_config():
     assert build_embedder(
         Settings(embedding_provider="azure_openai", azure_openai_model_ada2=None, azure_openai_endpoint=None)
     ) is None
+
+
+def test_ada2_is_used_regardless_of_provider(monkeypatch):
+    from code_qa import embeddings
+
+    # don't construct the real Azure client — just verify ada-2 is SELECTED
+    monkeypatch.setattr(embeddings, "_azure_embedder",
+                        lambda s, dep: embeddings.Embedder(client=object(), model=dep))
+    # EMBEDDING_PROVIDER left at the local default, chat provider anthropic — ada-2 must still win
+    s = Settings(llm_provider="anthropic", embedding_provider="local",
+                 azure_openai_model_ada2="ada-x", azure_openai_endpoint="https://e.openai.azure.com/")
+    emb = build_embedder(s)
+    assert emb is not None and emb.model == "ada-x"
+
+
+def test_embeddings_none_overrides_ada2(monkeypatch):
+    from code_qa import embeddings
+
+    monkeypatch.setattr(embeddings, "_azure_embedder", lambda s, dep: embeddings.Embedder(object(), dep))
+    s = Settings(embedding_provider="none", azure_openai_model_ada2="ada-x",
+                 azure_openai_endpoint="https://e.openai.azure.com/")
+    assert build_embedder(s) is None  # explicit opt-out still wins
