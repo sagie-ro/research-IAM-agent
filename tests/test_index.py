@@ -30,7 +30,25 @@ def test_schema_round_trips(built_index):
     _, db = built_index
     con = sqlite3.connect(db)
     try:
-        assert con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "2"
+        assert con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "3"
         assert con.execute("SELECT COUNT(*) FROM files").fetchone()[0] >= 4
     finally:
         con.close()
+
+
+def test_content_hash_populated(built_index):
+    index, _ = built_index
+    by_path = {f.relpath: f for f in index.files}
+    assert by_path["pkg/mod.py"].content_hash      # source files are hashed (delta key)
+    assert by_path["README.md"].content_hash       # docs too
+    assert by_path["asset.bin"].content_hash == ""  # inventory-only, never read
+
+
+def test_docs_are_chunked(built_index):
+    index, _ = built_index
+    by_file = {}
+    for c in index.doc_chunks:
+        by_file.setdefault(c.file_id, []).append(c)
+    assert "docs/guide.md" in by_file and "README.md" in by_file
+    headings = {c.heading for c in by_file["docs/guide.md"]}
+    assert "Dogs" in headings and "Design notes" in headings

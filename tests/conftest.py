@@ -56,6 +56,20 @@ public class Service implements Runnable {
 }
 """
 
+GUIDE_MD = """\
+# Animal Guide
+
+This guide explains the demo's animal model.
+
+## Dogs
+
+A Dog barks when it speaks, then defers to its parent Animal.
+
+## Design notes
+
+Sounds are produced by the noise helper. (Docs may lag the code.)
+"""
+
 
 @pytest.fixture
 def sample_repo(tmp_path):
@@ -63,6 +77,8 @@ def sample_repo(tmp_path):
     (tmp_path / "pkg" / "mod.py").write_text(PY_SRC)
     (tmp_path / "Service.java").write_text(JAVA_SRC)
     (tmp_path / "README.md").write_text("# Demo\nA sample repository.\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "guide.md").write_text(GUIDE_MD)
     (tmp_path / "asset.bin").write_bytes(b"\x00\x01\x02binary-blob")
     return RepoSource.from_local(tmp_path)
 

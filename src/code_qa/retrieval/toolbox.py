@@ -7,6 +7,7 @@ and key-free; the retriever agent (retriever.py) drives these tools.
 
 from __future__ import annotations
 
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -287,6 +288,45 @@ class Toolbox:
         except Exception as exc:
             return f"read error: {exc}"
         return f"{path}:{start}-{end}\n" + "\n".join(out)
+
+    def search_docs(self, query: str, limit: int = 5) -> str:
+        """Search the repository's DOCUMENTATION (README / markdown / docs) for relevant prose.
+        Returns the best-matching sections with file:line and heading. Docs explain intent and
+        design but can drift from the implementation — treat the CODE as authoritative when they
+        disagree, and confirm behavioral claims against code (read_file / the structural tools)."""
+        con = self._con()
+        try:
+            rows = con.execute(
+                "SELECT file_id, heading, start_line, end_line, source, text FROM doc_chunks"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return "no documentation indexed for this repository"
+        finally:
+            con.close()
+        if not rows:
+            return "no documentation indexed for this repository"
+
+        terms = {t for t in re.findall(r"\w+", query.lower()) if len(t) > 2}
+        if not terms:
+            return "query too short to search documentation"
+
+        scored: list[tuple[int, sqlite3.Row]] = []
+        for r in rows:
+            heading = (r["heading"] or "").lower()
+            text = (r["text"] or "").lower()
+            score = sum(text.count(t) for t in terms) + 3 * sum(1 for t in terms if t in heading)
+            if score:
+                scored.append((score, r))
+        if not scored:
+            return f"no documentation matched '{query}' (try the code tools instead)"
+        scored.sort(key=lambda x: -x[0])
+
+        out = ["documentation matches (intent/design — verify against code; code is authoritative):"]
+        for _, r in scored[:limit]:
+            tag = "doc" if r["source"] == "repo" else r["source"]
+            snippet = " ".join((r["text"] or "").split())[:300]
+            out.append(f"  [{tag}] {r['file_id']}:{r['start_line']}-{r['end_line']} · {r['heading']}\n    {snippet}")
+        return "\n".join(out)
 
     def search_lexical(self, pattern: str) -> str:
         """Regex/keyword search across source files (ripgrep, with a Python fallback)."""

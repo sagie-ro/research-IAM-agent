@@ -22,6 +22,7 @@ _DESCRIPTIONS = {
     "find_files": "List repo files by path substring, including binary/asset files (test fixtures, jars) indexed as inventory but not parsed. Use for 'what files/assets/fixtures exist'.",
     "read_file": "Read a slice of a file with line numbers. Use to confirm a finding before citing it.",
     "search_lexical": "Regex/keyword search across source files. Use when you don't have a symbol name yet (e.g. 'auth', 'password').",
+    "search_docs": "Search the repository's DOCUMENTATION (README, markdown, docs/) for design/intent prose. Use to understand WHY something exists or the intended behavior. Docs can drift from code — treat code as authoritative when they disagree, and verify behavioral claims against the code.",
 }
 
 
@@ -38,6 +39,7 @@ def make_tools(toolbox: Toolbox) -> list:
         "find_files": toolbox.find_files,
         "read_file": toolbox.read_file,
         "search_lexical": toolbox.search_lexical,
+        "search_docs": toolbox.search_docs,
     }
     return [
         StructuredTool.from_function(fn, name=name, description=_DESCRIPTIONS[name])

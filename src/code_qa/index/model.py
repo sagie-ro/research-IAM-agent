@@ -14,6 +14,19 @@ class FileRow:
     is_doc: bool
     parse_error: bool
     on_disk: bool = True
+    content_hash: str = ""  # sha1 of bytes for materialized source/doc; "" for inventory-only (delta key)
+
+
+@dataclass
+class DocChunkRow:
+    """A heading-delimited section of a documentation file — the unit of doc RAG."""
+
+    file_id: str
+    heading: str
+    start_line: int
+    end_line: int
+    source: str  # 'repo' (the repo's own docs) | 'corpus' (external, future)
+    text: str
 
 
 @dataclass
@@ -53,4 +66,5 @@ class Index:
     symbols: list[SymbolRow]
     edges: list[EdgeRow]
     call_paths: list[CallPathRow]
+    doc_chunks: list[DocChunkRow]
     meta: dict[str, str]

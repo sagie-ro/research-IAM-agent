@@ -1,7 +1,8 @@
 # Code-Q&A Agent — Project Plan (living document)
 
-**Status:** design v3.1 — locked; Inc 0–4 + multi-turn chat + eval metrics + router-brain refactor
-(locate · summarize · trace · router that can clarify & fetch context · researcher delegates · eval)
+**Status:** design v3.1 — locked; Inc 0–5(docs-RAG) + multi-turn chat + eval + router-brain refactor
+(locate · summarize · trace · clarify/fetch-context router · researcher delegates w/ retriever caps ·
+doc RAG, code-authoritative · eval). Next: Inc 6 delta indexing.
 **Branch:** `claude/cool-curie-yyEpt`
 **Last updated:** 2026-06-06
 
@@ -173,7 +174,9 @@ CLI. Three question shapes to serve:
   - **Embeddings** — symbol-aware chunks + doc chunks in a `VectorStore` (SQLite via `sqlite-vec`,
     unified with the graph in one file; swappable). **Optional** — see §7.
   - **Repo Map** — tree, detected entry points, dir/module roles.
-  - **Doc Inventory** — README/docs/comments (privileged for Summarize).
+  - **Doc RAG** — README/markdown/`docs/` split into heading-delimited **doc chunks** (stored in the
+    index); queried by `search_docs` for design/intent. **Code is authoritative** — docs ground
+    *intent*, never override what the code does (D16). Keyword-ranked today; semantic/vector optional (D10).
 - **Toolbox** (LangChain tools over the index, one `Retriever` interface):
   `search_lexical` (ripgrep) · `search_semantic` (vectors) · `get_symbol` · `find_callers` ·
   `find_callees` · **`get_references`** (all usage sites of a symbol) · `find_implementations` ·
@@ -291,8 +294,9 @@ that's expected and swappable via config when more Azure deployments exist.
 - **Inc 2 — Toolbox + retriever + router fast-path → Locate (Q1).** Seed eval + reasoning trace.
 - **Inc 3 — Summarize (Q2).** Doc/structure-first overview.
 - **Inc 4 — Researcher + multi-hop Trace (Q3).** Team topology, parallel retrievers, boundary awareness.
-- **Inc 5 — HITL interrupt + professional-corpus RAG + budgeted web search.**
-- **Inc 6 — Incremental delta indexing** (`git diff` → impact).
+- **Inc 5 — RAG grounding.** ✅ **Repo-docs RAG** (heading-chunked `search_docs`, code-authoritative / D16).
+  *(Deferred tail: external professional-corpus RAG, budgeted web search, HITL interrupt.)*
+- **Inc 6 — Incremental delta indexing** (content-hash delta → re-parse only changed files).
 - **Inc 7 — Eval expansion + trace report.** *(Future: HTML report skill, HITL learning loop.)*
 
 ---
@@ -344,6 +348,11 @@ that's expected and swappable via config when more Azure deployments exist.
 - **D15** **Researcher is a pure reasoner** — it plans over the structural tools and **delegates all
   code-reading/searching to retriever workers** (`spawn_retrievers`); it has no `read_file`/`search_lexical`.
   Clean tier separation: Opus reasons, Sonnet fetches.
+- **D16** **Docs ground intent; code is authoritative.** Repo documentation (README/markdown/`docs/`) is
+  chunked by heading into the index and retrieved via `search_docs` to explain *why*/design. Docs can
+  drift or be aspirational, so behavioral claims are **verified against code, and code wins on conflict**.
+  Both researcher and retriever may consult docs (it is not a `_DELEGATED` code-reading tool). Retrieval is
+  keyword-ranked for now; a semantic/vector backend is the optional upgrade (D10/D11).
 
 ## 11. Assumptions log
 

@@ -183,6 +183,7 @@ def _render_stats(console: Console, s: dict) -> None:
     console.print(
         f"[bold]files[/] {s['files_total']}  "
         f"[bold]doc-flagged[/] {s['doc_files']}  "
+        f"[bold]doc-chunks[/] {s.get('doc_chunks', 0)}  "
         f"[bold]parse errors[/] {s['parse_errors']}"
     )
 
