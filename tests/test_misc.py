@@ -1,7 +1,13 @@
+from code_qa.cli import main
 from code_qa.config import Settings
 from code_qa.eval.runner import score
 from code_qa.graph import build_graph
 from code_qa.llm import ModelFactory
+
+
+def test_cli_bad_repo_path_exits_cleanly():
+    # A non-existent local path should produce a clean exit code, not a traceback.
+    assert main(["inspect", "--repo", "/no/such/dir/xyz"]) == 1
 
 
 def test_eval_score_recall():

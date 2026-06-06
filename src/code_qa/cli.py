@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 
 from dotenv import load_dotenv
@@ -34,7 +35,13 @@ def main(argv: list[str] | None = None) -> int:
     command = "chat"
     if argv and argv[0] in _COMMANDS:
         command = argv.pop(0)
-    return {"chat": _chat, "index": _index, "inspect": _inspect, "eval": _eval}[command](argv)
+    try:
+        return {"chat": _chat, "index": _index, "inspect": _inspect, "eval": _eval}[command](argv)
+    except KeyboardInterrupt:
+        return 130
+    except (ValueError, FileNotFoundError, subprocess.CalledProcessError) as exc:
+        Console().print(f"[red]error:[/] {exc}")
+        return 1
 
 
 def _chat(argv: list[str]) -> int:

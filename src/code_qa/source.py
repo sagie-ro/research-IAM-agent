@@ -47,7 +47,10 @@ class RepoSource:
     def from_local(cls, path: str | Path) -> "RepoSource":
         p = Path(path).expanduser().resolve()
         if not p.is_dir():
-            raise ValueError(f"Not a directory: {p}")
+            raise ValueError(
+                f"Not a directory: {p}. If this is a remote repo, pass its URL "
+                "(e.g. https://github.com/owner/repo)."
+            )
         sha = _git_sha(p)
         return cls(path=p, sha=sha, is_git=(p / ".git").exists() or sha is not None)
 
