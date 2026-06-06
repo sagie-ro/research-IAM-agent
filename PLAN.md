@@ -92,62 +92,65 @@ CLI. Three question shapes to serve:
 ### 4.1 System diagram
 
 ```
-                                  ┌───────────────────────────────┐
-                                  │        USER  ·  CLI REPL       │
-                                  │   multi-turn, natural language │
-                                  └──────┬─────────────────▲───────┘
-                                question │        NL answer │ (+ file:line citations)
-                                         ▼                  │
-        ┌────────────────────────────────────────────────────────────────────────┐
-        │  CONVERSATION ROUTER  ·  lightweight LLM                                 │
-        │  scope-guard / abuse filter → intent → route → present (NL→user)         │
-        │  the ONLY agent that speaks natural language to the user                 │
-        └───────┬───────────────────────────────────────┬────────────────────────┘
-       fast path│ (locate / trivial)        escalate     │ (summarize / trace / pro inquiry)
-   spawn ↕ structured findings                           ▼
-        │                          ┌──────────────────────────────────────────────┐
-        │                          │  RESEARCHER  ·  heavy LLM  ·  structured I/O   │
-        │                          │  plans investigation · reasons · synthesizes  │
-        │           dispatch ↕     │  conclusions · raises HITL when inconclusive  │
-        │           findings       └───┬───────────────┬───────────────┬───────────┘
-        │                              │ spawn ↕        │ RAG           │ web (budgeted,
-        ▼                              ▼ (parallel)     ▼               ▼  run via retriever)
-   ┌────────────────────────────────────────────┐  ┌──────────────┐  ┌────────────┐
-   │  RETRIEVER WORKERS · mid LLM · ×N parallel  │  │ PROFESSIONAL │  │    WEB     │
-   │  structured I/O · locate / map / connect    │  │ CORPUS (RAG, │  │ (opt-in,   │
-   │  spawned by Router OR Researcher;           │  │ user-fed,    │  │  future)   │
-   │  return findings to whoever dispatched      │  │ optional)    │  └────────────┘
-   └──────────────────────┬──────────────────────┘  └──────────────┘
-                          │ call tools
-                          ▼
+                          ┌───────────────────────────────┐
+                          │        USER  ·  CLI REPL       │
+                          │   multi-turn, natural language │
+                          └──────┬─────────────────▲───────┘
+                        question │   final NL answer │ (+ file:line citations)
+                                 ▼                 │
+   ┌──────────────────────────────────────────────────────────────────────────┐
+   │  CONVERSATION ROUTER  ·  lightweight LLM                                   │
+   │  scope-guard → intent → route → COMPILE final answer (NL → user)           │
+   │  the ONLY agent that speaks NL to the user; assembles workers' findings    │
+   └──┬────▲──────────────────────────────────────────────┬────▲───────────────┘
+      │    │                                               │    │
+ dispatch │ │ findings                              escalate│ │ report
+ (locate) │ │ (structured)                                  │ │ (structured)
+      ▼    │                                               ▼    │
+   ┌─────────────────────────────┐   team: dispatch ↕   ┌──────────────────────────┐
+   │  RETRIEVER WORKERS          │◄────  findings   ────►│  RESEARCHER · heavy LLM   │
+   │  mid LLM · ×N parallel      │                       │  structured I/O           │
+   │  structured I/O · locate /  │                       │  plans · reasons ·        │
+   │  map / connect              │                       │  synthesizes conclusions  │
+   │  spawned by Router OR       │                       │  raises HITL when stuck   │
+   │  Researcher; findings go    │                       └──────┬───────────┬───────┘
+   │  back to whoever spawned    │                              │ RAG       │ web (budgeted,
+   └─────────────┬───────────────┘                              ▼           ▼  via retriever)
+                 │ call tools                            ┌────────────┐ ┌──────────┐
+                 ▼                                       │PROFESSIONAL│ │   WEB    │
+   ┌────────────────────────────────────────────┐       │CORPUS (RAG,│ │(opt-in,  │
+   │  TOOLBOX  (LangChain tools over the index)  │       │user-fed)   │ │ future)  │
+   │  search_lexical · search_semantic ·         │       └────────────┘ └──────────┘
+   │  get_symbol · find_callers · find_callees · │
+   │  get_references · find_implementations ·    │
+   │  get_call_path · read_file · repo_overview  │
+   └─────────────┬───────────────────────────────┘
+                 │ read
+                 ▼
    ┌────────────────────────────────────────────────────────────────────────────┐
-   │  TOOLBOX  (LangChain tools over the index)                                   │
-   │  search_lexical(rg) · search_semantic(vec) · get_symbol · find_callers       │
-   │  find_callees · get_references · find_implementations · get_call_path         │
-   │  read_file · repo_overview                                                    │
-   └──────────────────────┬─────────────────────────────────────────────────────┘
-                          │ read
-                          ▼
-   ┌────────────────────────────────────────────────────────────────────────────┐
-   │  INDEX  ·  on-disk SQLite  ·  keyed by commit SHA  ·  delta via `git diff`    │
-   │   [Symbol Graph]   [Call-Paths]   [Embeddings]   [Repo Map]   [Doc Inventory] │
-   │   nodes+edges:     precomputed    vectors        tree+entry   README/docs     │
-   │   calls/imports/   traces from    (ada-2)        points       comments        │
-   │   extends/impl     entry points                                               │
+   │  INDEX · on-disk SQLite · keyed by commit SHA · delta via `git diff`         │
+   │   [Symbol Graph]  [Call-Paths]  [Embeddings]  [Repo Map]  [Doc Inventory]    │
+   │   nodes+edges:    precomputed   vectors       tree+entry  README/docs        │
+   │   calls/imports/  traces from   (ada-2)       points      comments           │
+   │   extends/impl    entry points                                               │
    └──────────────────────▲─────────────────────────────────────────────────────┘
                           │ build: tree-sitter + hand-rolled resolution (Option A)
    ┌──────────────────────┴─────────────────────────────────────────────────────┐
-   │  INDEXER   ◄─ Language Profiles (tree-sitter): Python · Java · (+pluggable)  │
-   │            ◄─ Source Adapter:  local path  |  git clone(url,ref) → pinned SHA│
+   │  INDEXER  ◄─ Language Profiles (tree-sitter): Python · Java · (+pluggable)   │
+   │           ◄─ Source Adapter: local path | git clone(url,ref) → pinned SHA    │
    └────────────────────────────────────────────────────────────────────────────┘
+
+   Flow of one answer:  USER → ROUTER → (dispatch) RETRIEVER/RESEARCHER → tools/index
+                        → structured findings & report flow BACK UP to ROUTER
+                        → ROUTER compiles the single NL answer → USER
 
    CROSS-CUTTING
    ├─ LLM PROVIDER LAYER · LangChain init_chat_model · per-role model/provider
-   │     default = Azure OpenAI: GPT-4o (chat) + text-embedding-ada-002, AD-token auth
-   ├─ TRACING · local structured trace (JSONL) per query: route → tools → reasoning → answer
+   │     default Azure OpenAI: GPT-4o (chat) + text-embedding-ada-002, AD-token auth
+   ├─ TRACING · local structured trace (JSONL): route → tools → reasoning → answer
    │     [future: LangSmith / Datadog]
-   ├─ HITL · LangGraph interrupt + checkpointer → human review queue  (learning loop = future)
-   └─ EVAL HARNESS (offline) · cases → retrieval-recall + LLM-judge + groundedness + trace
+   ├─ HITL · LangGraph interrupt + checkpointer → human review queue (learning = future)
+   └─ EVAL HARNESS (offline) · cases → retrieval-recall + LLM-judge + groundedness
 ```
 
 ### 4.2 Components
@@ -172,13 +175,16 @@ CLI. Three question shapes to serve:
   top-k), with dedup/diversity + token budget.
 - **Agent graph (LangGraph) — works like a team:**
   - **Conversation Router** (lightweight LLM) — owns the conversation; scope-guard / abuse filter; intent
-    classify; route; render the final NL answer. Has **fast paths**: trivial/locate → router → a single
-    retriever → answer, *without* waking the researcher (cost ∝ difficulty).
+    classify; route to workers; **receives their structured findings back and COMPILES the single
+    user-facing NL answer**. Has **fast paths**: trivial/locate → router → a single retriever → (findings
+    back) → answer, *without* waking the researcher (cost ∝ difficulty).
   - **Retriever workers** (mid LLM, ×N parallel) — wield the toolbox; produce **structured findings**;
-    **spawnable by the router OR the researcher**, and hand findings back to whoever dispatched them.
+    **spawnable by the router OR the researcher**, and hand findings back to whoever dispatched them
+    (router or researcher).
   - **Researcher** (heavy LLM) — deep reasoning + **structured conclusions**; orchestrates retrievers as a
     team (back-and-forth, parallel fan-out); optional RAG over a user-fed professional corpus; budgeted web
-    search (executed via a retriever); raises a **HITL interrupt** with a structured report when inconclusive.
+    search (executed via a retriever); raises a **HITL interrupt** with a structured report when
+    inconclusive; **returns a structured report up to the router** for final presentation.
   - **Handoffs are typed** (Pydantic schemas) everywhere; only the router's user-facing message is NL.
 - **Conversation/state** — multi-turn REPL; session state = history + a **working set** of retrieved
   symbols/files so follow-ups are cheap. LangGraph checkpointer persists state (also enables HITL).
@@ -253,9 +259,9 @@ researcher) the moment another deployment is added — **config-only change, no 
 ## 9. Eval & tracing
 
 - **Reasoning trace (explainability):** every query emits a structured trace — router decision + rationale →
-  route taken → each retriever's tool calls + results → researcher reasoning + evidence → final answer +
-  citations. **Default = local-first JSONL** (keeps sensitive code on-machine). **LangSmith / Datadog =
-  future dev** (they ship traces externally).
+  route taken → each retriever's tool calls + results → researcher reasoning + evidence → findings/report
+  returned to router → final answer + citations. **Default = local-first JSONL** (keeps sensitive code
+  on-machine). **LangSmith / Datadog = future dev** (they ship traces externally).
 - **Eval harness (offline, repo-agnostic):** Python-defined cases `{question, expected paths/symbols,
   rubric, type}` → retrieval recall/hit-rate + LLM-judge against rubric + groundedness (cited files real &
   relevant). Includes boundary/negative cases (e.g. "can signify sign?" → no; "where is the real crypto?"
@@ -265,10 +271,11 @@ researcher) the moment another deployment is added — **config-only change, no 
 
 ## 10. Decisions log
 
-- **D1** Read-only static analysis; never execute/build the target repo (security). 
+- **D1** Read-only static analysis; never execute/build the target repo (security).
 - **D2** tree-sitter + SQLite symbol graph; **hand-rolled resolution (Option A)**; skip GitNexus.
 - **D3** Multi-agent (LangGraph): lightweight **router** / mid **retriever(s)** / heavy **researcher**;
   team topology (router *and* researcher can spawn retrievers; retrievers report back to dispatcher).
+  All findings/reports flow **back up to the router**, which compiles the single user-facing answer.
 - **D4** Per-role model modularity via LangChain; **Azure default** (GPT-4o + ada-2).
 - **D5** **UV** packaging; **Python config**; secrets via `.env`.
 - **D6** **Local-first structured tracing**; LangSmith/Datadog = future.
