@@ -27,10 +27,39 @@ class IndexHandle:
     store_path: Path
 
 
+def _hybrid_rank(rows, query, vectors, embedder, limit):
+    """Rank doc/corpus chunks by normalized semantic (cosine) ⊕ keyword overlap. Returns
+    (top_rows, mode) where mode is 'semantic+keyword' or 'keyword'. Pure + store-agnostic."""
+    terms = {t for t in re.findall(r"\w+", query.lower()) if len(t) > 2}
+    keyword = {
+        r["id"]: sum((r["text"] or "").lower().count(t) for t in terms)
+        + 3 * sum(1 for t in terms if t in (r["heading"] or "").lower())
+        for r in rows
+    }
+    semantic: dict[int, float] = {}
+    if vectors and embedder is not None:
+        try:
+            qv = embedder.embed_query(query)
+            semantic = {r["id"]: max(0.0, cosine(qv, vectors[r["id"]])) for r in rows if r["id"] in vectors}
+        except Exception:
+            semantic = {}
+
+    def _norm(scores):
+        top = max(scores.values(), default=0.0) or 1.0
+        return {k: v / top for k, v in scores.items()}
+
+    nk, ns = _norm(keyword), _norm(semantic)
+    combined = {r["id"]: nk.get(r["id"], 0.0) + ns.get(r["id"], 0.0) for r in rows}
+    ranked = sorted(rows, key=lambda r: combined[r["id"]], reverse=True)
+    top = [r for r in ranked if combined[r["id"]] > 0][:limit]
+    return top, ("semantic+keyword" if semantic else "keyword")
+
+
 class Toolbox:
-    def __init__(self, handle: IndexHandle, embedder=None) -> None:
+    def __init__(self, handle: IndexHandle, embedder=None, corpus_path=None) -> None:
         self.h = handle
-        self._embedder = embedder  # optional; enables semantic doc search when present
+        self._embedder = embedder  # optional; enables semantic doc/corpus search when present
+        self._corpus_path = corpus_path  # optional external professional-corpus store
 
     def _con(self) -> sqlite3.Connection:
         con = sqlite3.connect(self.h.store_path)
@@ -293,12 +322,8 @@ class Toolbox:
             return f"read error: {exc}"
         return f"{path}:{start}-{end}\n" + "\n".join(out)
 
-    def search_docs(self, query: str, limit: int = 5) -> str:
-        """Search the repository's DOCUMENTATION (README / markdown / docs) for relevant prose.
-        Hybrid: semantic (embeddings) when available, blended with keyword overlap; keyword-only
-        otherwise. Docs explain intent and design but can drift from the implementation — treat the
-        CODE as authoritative when they disagree, and confirm behavioral claims against code."""
-        con = self._con()
+    def _doc_search(self, con, query: str, header: str, limit: int) -> str | None:
+        """Shared hybrid search over a doc_chunks/doc_vectors store (repo index or corpus)."""
         try:
             rows = con.execute(
                 "SELECT id, file_id, heading, start_line, end_line, source, text FROM doc_chunks"
@@ -313,45 +338,53 @@ class Toolbox:
                 except sqlite3.OperationalError:
                     vectors = {}
         except sqlite3.OperationalError:
-            return "no documentation indexed for this repository"
-        finally:
-            con.close()
+            return None
         if not rows:
-            return "no documentation indexed for this repository"
-
-        terms = {t for t in re.findall(r"\w+", query.lower()) if len(t) > 2}
-        keyword = {
-            r["id"]: sum((r["text"] or "").lower().count(t) for t in terms)
-            + 3 * sum(1 for t in terms if t in (r["heading"] or "").lower())
-            for r in rows
-        }
-
-        semantic: dict[int, float] = {}
-        if vectors and self._embedder is not None:
-            try:
-                qv = self._embedder.embed_query(query)
-                semantic = {r["id"]: max(0.0, cosine(qv, vectors[r["id"]])) for r in rows if r["id"] in vectors}
-            except Exception:
-                semantic = {}
-
-        def _norm(scores: dict[int, float]) -> dict[int, float]:
-            top = max(scores.values(), default=0.0) or 1.0
-            return {k: v / top for k, v in scores.items()}
-
-        nk, ns = _norm(keyword), _norm(semantic)
-        combined = {r["id"]: nk.get(r["id"], 0.0) + ns.get(r["id"], 0.0) for r in rows}
-        ranked = sorted(rows, key=lambda r: combined[r["id"]], reverse=True)
-        top = [r for r in ranked if combined[r["id"]] > 0][:limit]
+            return None
+        top, mode = _hybrid_rank(rows, query, vectors, self._embedder, limit)
         if not top:
-            return f"no documentation matched '{query}' (try the code tools instead)"
-
-        mode = "semantic+keyword" if semantic else "keyword"
-        out = [f"documentation matches ({mode}; intent/design — verify against code; code is authoritative):"]
+            return f"no matches for '{query}'"
+        out = [header.format(mode=mode)]
         for r in top:
             tag = "doc" if r["source"] == "repo" else r["source"]
             snippet = " ".join((r["text"] or "").split())[:300]
             out.append(f"  [{tag}] {r['file_id']}:{r['start_line']}-{r['end_line']} · {r['heading']}\n    {snippet}")
         return "\n".join(out)
+
+    def search_docs(self, query: str, limit: int = 5) -> str:
+        """Search the repository's DOCUMENTATION (README / markdown / docs) for relevant prose.
+        Hybrid: semantic (embeddings) when available, blended with keyword overlap; keyword-only
+        otherwise. Docs explain intent and design but can drift from the implementation — treat the
+        CODE as authoritative when they disagree, and confirm behavioral claims against code."""
+        con = self._con()
+        try:
+            res = self._doc_search(
+                con, query,
+                "documentation matches ({mode}; intent/design — verify against code; code is authoritative):",
+                limit,
+            )
+        finally:
+            con.close()
+        return res or "no documentation indexed for this repository"
+
+    def search_corpus(self, query: str, limit: int = 5) -> str:
+        """Search the external professional CORPUS the user supplied (standards, design references,
+        domain docs). This is GENERAL reference knowledge, NOT specific to this repo — use it to
+        bring in standards/best-practices/background. It NEVER overrides the repo's actual code."""
+        if not self._corpus_path:
+            return "no professional corpus is configured"
+        con = sqlite3.connect(self._corpus_path)
+        con.row_factory = sqlite3.Row
+        try:
+            res = self._doc_search(
+                con, query,
+                "corpus matches ({mode}; external reference, general knowledge — NOT specific to this "
+                "repo and never overrides the actual code):",
+                limit,
+            )
+        finally:
+            con.close()
+        return res or "the professional corpus has no matching reference"
 
     def search_lexical(self, pattern: str) -> str:
         """Regex/keyword search across source files (ripgrep, with a Python fallback)."""

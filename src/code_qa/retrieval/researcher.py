@@ -35,6 +35,11 @@ explain INTENT and design. But docs can be outdated or aspirational: VERIFY ever
 against the code, and when documentation and code disagree, the CODE is ground truth. Cite code
 (file:line) for what the system actually does; lean on docs only for rationale/intent.
 
+When available, search_corpus (the user's external reference library) and web_search (the public
+web) provide EXTERNAL background — standards, library docs, domain knowledge. Use them to inform
+your reasoning and cite them as external, but they are general knowledge: they NEVER override the
+repo's actual code. Spend web_search sparingly (it is budgeted).
+
 The static call graph is precision-first and misses dynamic dispatch (interfaces, ServiceLoader,
 reflection, super() chains) — when a hop is unresolved, ask a retriever to read the code and bridge
 it. BOUNDARY AWARENESS: note where the flow leaves THIS repo into third-party libraries.

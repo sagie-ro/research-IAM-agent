@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     azure_openai_api_version: str | None = None
     azure_openai_model_ada2: str | None = None  # embedding deployment (text-embedding-ada-002)
 
+    # External professional-corpus RAG (optional; a directory of reference docs).
+    corpus_path: str | None = None
+
     # Scope-guard / abuse budgets (principle 7).
     max_question_chars: int = 4000
     retriever_max_steps: int = 6  # tool-call budget per retriever worker

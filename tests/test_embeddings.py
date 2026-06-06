@@ -4,34 +4,12 @@ Uses a deterministic fake embedder so the path is exercised without any cloud cr
 
 from __future__ import annotations
 
-import hashlib
-import re
-
 from code_qa.config import Settings
 from code_qa.embeddings import build_embedder, cosine, index_doc_vectors
 from code_qa.index import store
 from code_qa.index.builder import build
 from code_qa.index.store import pack_vector, unpack_vector
 from code_qa.retrieval import IndexHandle, Toolbox
-
-
-class FakeEmbedder:
-    """Deterministic bag-of-words hashing embedder (16-dim) — no network, stable across runs."""
-
-    model = "fake-16"
-
-    def _vec(self, text: str) -> list[float]:
-        dim = 16
-        v = [0.0] * dim
-        for w in re.findall(r"[a-z]+", text.lower()):
-            v[int(hashlib.md5(w.encode()).hexdigest(), 16) % dim] += 1.0
-        return v
-
-    def embed_documents(self, texts):
-        return [self._vec(t) for t in texts]
-
-    def embed_query(self, text):
-        return self._vec(text)
 
 
 def test_vector_pack_round_trip():
@@ -45,18 +23,18 @@ def test_cosine():
     assert cosine([], [1.0]) == 0.0
 
 
-def test_index_doc_vectors_is_incremental(sample_repo, tmp_path):
+def test_index_doc_vectors_is_incremental(sample_repo, tmp_path, fake_embedder):
     db = tmp_path / "i.sqlite"
     store.write(build(sample_repo), db)
-    emb = FakeEmbedder()
+    emb = fake_embedder
     assert index_doc_vectors(db, emb) > 0   # embeds the doc chunks
     assert index_doc_vectors(db, emb) == 0  # cached — nothing new to embed
 
 
-def test_hybrid_search_uses_semantic_when_embedded(sample_repo, tmp_path):
+def test_hybrid_search_uses_semantic_when_embedded(sample_repo, tmp_path, fake_embedder):
     db = tmp_path / "i.sqlite"
     store.write(build(sample_repo), db)
-    emb = FakeEmbedder()
+    emb = fake_embedder
     index_doc_vectors(db, emb)
     tb = Toolbox(IndexHandle(repo_root=sample_repo.path, store_path=db), embedder=emb)
     out = tb.search_docs("dog")

@@ -34,4 +34,4 @@ def test_search_docs_finds_section(toolbox):
 
 
 def test_search_docs_no_match(toolbox):
-    assert "no documentation matched" in toolbox.search_docs("kubernetes helm chart")
+    assert "no matches for" in toolbox.search_docs("kubernetes helm chart")

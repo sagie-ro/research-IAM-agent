@@ -51,6 +51,7 @@ def _chat(argv: list[str]) -> int:
     parser.add_argument("--repo", help="Local path or git URL of the target repository.")
     parser.add_argument("--ref", help="Git ref/branch (use with a git URL).")
     parser.add_argument("--once", help="Ask a single question, print the answer, and exit.")
+    parser.add_argument("--corpus", help="Directory of external reference docs (professional-corpus RAG).")
     parser.add_argument("--show-trace", action="store_true", help="Print the reasoning trace after each answer.")
     args = parser.parse_args(argv)
 
@@ -65,7 +66,8 @@ def _chat(argv: list[str]) -> int:
         path, built = service.ensure_index(source)
         console.print(f"[dim]{'built' if built else 'cached'} index{_delta_note(path) if built else ''} -> {path}[/]")
         embedder = _setup_embeddings(console, settings, path)
-        retrieval = build_retrieval(IndexHandle(repo_root=source.path, store_path=path), embedder)
+        corpus_path = _setup_corpus(console, args.corpus or settings.corpus_path, embedder)
+        retrieval = build_retrieval(IndexHandle(repo_root=source.path, store_path=path), embedder, corpus_path)
     else:
         console.print("[yellow]No --repo given; running in chat-only mode (no code retrieval).[/]")
 
@@ -172,6 +174,24 @@ def _eval(argv: list[str]) -> int:
     from .eval.runner import run
 
     return run(only=args.only, save=args.save)
+
+
+def _setup_corpus(console: Console, corpus_dir, embedder):
+    """Build/load the optional external professional corpus; return its store path or None."""
+    if not corpus_dir:
+        return None
+    try:
+        from .corpus import ensure_corpus
+
+        corpus_path = ensure_corpus(corpus_dir, embedder)
+        if corpus_path is None:
+            console.print(f"[yellow]corpus: no documents found under {corpus_dir}[/]")
+        else:
+            console.print(f"[dim]corpus: loaded reference docs from {corpus_dir}[/]")
+        return corpus_path
+    except Exception as exc:
+        console.print(f"[yellow]corpus disabled ({type(exc).__name__}: {exc})[/]")
+        return None
 
 
 def _setup_embeddings(console: Console, settings: Settings, path):

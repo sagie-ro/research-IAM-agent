@@ -2,12 +2,38 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
+
 import pytest
 
 from code_qa.index import store
 from code_qa.index.builder import build
 from code_qa.retrieval import IndexHandle, Toolbox
 from code_qa.source import RepoSource
+
+
+class FakeEmbedder:
+    """Deterministic bag-of-words hashing embedder (16-dim) — no network, stable across runs."""
+
+    model = "fake-16"
+
+    def _vec(self, text: str) -> list[float]:
+        v = [0.0] * 16
+        for w in re.findall(r"[a-z]+", text.lower()):
+            v[int(hashlib.md5(w.encode()).hexdigest(), 16) % 16] += 1.0
+        return v
+
+    def embed_documents(self, texts):
+        return [self._vec(t) for t in texts]
+
+    def embed_query(self, text):
+        return self._vec(text)
+
+
+@pytest.fixture
+def fake_embedder():
+    return FakeEmbedder()
 
 PY_SRC = """\
 import os

@@ -23,6 +23,7 @@ _DESCRIPTIONS = {
     "read_file": "Read a slice of a file with line numbers. Use to confirm a finding before citing it.",
     "search_lexical": "Regex/keyword search across source files. Use when you don't have a symbol name yet (e.g. 'auth', 'password').",
     "search_docs": "Search the repository's DOCUMENTATION (README, markdown, docs/) for design/intent prose. Use to understand WHY something exists or the intended behavior. Docs can drift from code — treat code as authoritative when they disagree, and verify behavioral claims against the code.",
+    "search_corpus": "Search the EXTERNAL professional corpus the user supplied (standards, design references, domain docs) — general reference knowledge, NOT specific to this repo. Use for standards/best-practices/background context. It never overrides the repo's actual code.",
 }
 
 
@@ -41,6 +42,8 @@ def make_tools(toolbox: Toolbox) -> list:
         "search_lexical": toolbox.search_lexical,
         "search_docs": toolbox.search_docs,
     }
+    if getattr(toolbox, "_corpus_path", None):  # only expose when a corpus is configured
+        methods["search_corpus"] = toolbox.search_corpus
     return [
         StructuredTool.from_function(fn, name=name, description=_DESCRIPTIONS[name])
         for name, fn in methods.items()

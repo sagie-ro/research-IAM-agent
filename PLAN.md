@@ -298,8 +298,9 @@ that's expected and swappable via config when more Azure deployments exist.
 - **Inc 2 — Toolbox + retriever + router fast-path → Locate (Q1).** Seed eval + reasoning trace.
 - **Inc 3 — Summarize (Q2).** Doc/structure-first overview.
 - **Inc 4 — Researcher + multi-hop Trace (Q3).** Team topology, parallel retrievers, boundary awareness.
-- **Inc 5 — RAG grounding.** ✅ **Repo-docs RAG** — hybrid `search_docs` (Azure ada-2 semantic ⊕ keyword,
-  fallback), code-authoritative (D16). *(Deferred tail: external professional-corpus RAG, web search, HITL.)*
+- **Inc 5 — RAG grounding.** ✅ **Repo-docs RAG** (hybrid `search_docs`, ada-2 ⊕ keyword) + ✅ **external
+  professional-corpus RAG** (`search_corpus`, separate store), code-authoritative (D16). *(Deferred: web
+  search [next] · HITL [skipped per request].)*
 - **Inc 6 — Incremental delta indexing.** ✅ Content-hash delta → reuse unchanged files, re-parse only
   changes, re-assemble globally (`build_delta`); auto-used by `ensure_index` when a prior index exists.
 - **Inc 7 — Eval expansion + trace report.** *(Future: HTML report skill, HITL learning loop.)*
@@ -370,5 +371,7 @@ that's expected and swappable via config when more Azure deployments exist.
   (GPT-4o + ada-2) available as the alternate. Anthropic provides **no** embeddings model.
 - **A2** Outbound network available for `git clone` + the chosen LLM provider (clone verified working).
 - **A3** Single target repo per session; Python/Java only for v1.
-- **A4** Professional-corpus RAG is user-supplied and optional (empty by default).
+- **A4** Professional-corpus RAG is user-supplied and optional (empty by default). Implemented Inc 5:
+  `--corpus <dir>` (or `CORPUS_PATH`) → a **separate** hybrid store (chunks + ada-2 vectors, keyed by dir +
+  content hash) exposed as `search_corpus` — external reference knowledge, never an override of repo code.
 - **A5** Repo pinned at a commit SHA for reproducibility/delta.

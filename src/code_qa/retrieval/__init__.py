@@ -23,6 +23,6 @@ class Retrieval:
     toolbox: Toolbox
 
 
-def build_retrieval(handle: IndexHandle, embedder=None) -> Retrieval:
-    toolbox = Toolbox(handle, embedder=embedder)
+def build_retrieval(handle: IndexHandle, embedder=None, corpus_path=None) -> Retrieval:
+    toolbox = Toolbox(handle, embedder=embedder, corpus_path=corpus_path)
     return Retrieval(tools=make_tools(toolbox), overview=toolbox.repo_overview(), toolbox=toolbox)
