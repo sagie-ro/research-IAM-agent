@@ -6,6 +6,7 @@ import argparse
 import json
 import subprocess
 import sys
+import warnings
 
 from dotenv import load_dotenv
 from rich.console import Console
@@ -33,6 +34,8 @@ def _resolve_repo(repo: str, ref: str | None) -> RepoSource:
 
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
+    # Harmless noise from langchain_openai structured output (the `parsed` field round-trip).
+    warnings.filterwarnings("ignore", message="Pydantic serializer warnings")
     argv = list(sys.argv[1:] if argv is None else argv)
     command = "chat"
     if argv and argv[0] in _COMMANDS:
