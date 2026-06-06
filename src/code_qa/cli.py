@@ -63,8 +63,9 @@ def _chat(argv: list[str]) -> int:
         source = _resolve_repo(args.repo, args.ref)
         console.print(f"[green]Loaded[/] {source.summary()} — building/loading index …")
         path, built = service.ensure_index(source)
-        retrieval = build_retrieval(IndexHandle(repo_root=source.path, store_path=path))
         console.print(f"[dim]{'built' if built else 'cached'} index{_delta_note(path) if built else ''} -> {path}[/]")
+        embedder = _setup_embeddings(console, settings, path)
+        retrieval = build_retrieval(IndexHandle(repo_root=source.path, store_path=path), embedder)
     else:
         console.print("[yellow]No --repo given; running in chat-only mode (no code retrieval).[/]")
 
@@ -171,6 +172,24 @@ def _eval(argv: list[str]) -> int:
     from .eval.runner import run
 
     return run(only=args.only, save=args.save)
+
+
+def _setup_embeddings(console: Console, settings: Settings, path):
+    """Build the configured embedder (if any) and embed any un-embedded doc chunks. Semantic
+    search is additive — on any failure we warn and fall back to keyword doc search."""
+    try:
+        from .embeddings import build_embedder, index_doc_vectors
+
+        embedder = build_embedder(settings)
+        if embedder is None:
+            return None
+        n = index_doc_vectors(path, embedder)
+        console.print(f"[dim]embeddings: {embedder.model}"
+                      + (f" (+{n} doc vectors)" if n else " (cached)") + "[/]")
+        return embedder
+    except Exception as exc:
+        console.print(f"[yellow]embeddings disabled ({type(exc).__name__}: {exc}); using keyword doc search[/]")
+        return None
 
 
 def _delta_note(path) -> str:

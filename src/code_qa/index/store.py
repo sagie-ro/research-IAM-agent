@@ -7,12 +7,13 @@ builder can reuse parsed results for unchanged files (Inc 6).
 
 from __future__ import annotations
 
+import array
 import sqlite3
 from pathlib import Path
 
 from .model import CallPathRow, DocChunkRow, EdgeRow, FileRow, Index, SymbolRow
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
@@ -32,6 +33,9 @@ CREATE TABLE call_paths (entry_id TEXT, from_id TEXT, to_id TEXT, depth INTEGER)
 CREATE TABLE doc_chunks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     file_id TEXT, heading TEXT, start_line INTEGER, end_line INTEGER, source TEXT, text TEXT
+);
+CREATE TABLE doc_vectors (
+    chunk_id INTEGER, model TEXT, dim INTEGER, vec BLOB, PRIMARY KEY(chunk_id, model)
 );
 CREATE INDEX idx_sym_name ON symbols(name);
 CREATE INDEX idx_sym_file ON symbols(file_id);
@@ -105,6 +109,43 @@ def read_index(path: Path) -> Index:
     finally:
         con.close()
     return Index(meta.get("repo_path", ""), meta.get("sha") or None, files, symbols, edges, [], doc_chunks, meta)
+
+
+def pack_vector(vec: list[float]) -> bytes:
+    return array.array("f", vec).tobytes()
+
+
+def unpack_vector(blob: bytes) -> list[float]:
+    a = array.array("f")
+    a.frombytes(blob)
+    return a.tolist()
+
+
+def read_unembedded_chunks(path: Path, model: str) -> list[tuple[int, str]]:
+    """Doc chunks that have no vector yet for this embedding model (incremental embedding)."""
+    con = sqlite3.connect(path)
+    try:
+        rows = con.execute(
+            "SELECT d.id, d.text FROM doc_chunks d "
+            "LEFT JOIN doc_vectors v ON v.chunk_id = d.id AND v.model = ? "
+            "WHERE v.chunk_id IS NULL",
+            (model,),
+        ).fetchall()
+    finally:
+        con.close()
+    return [(r[0], r[1]) for r in rows]
+
+
+def write_vectors(path: Path, model: str, items: list[tuple[int, list[float]]]) -> None:
+    con = sqlite3.connect(path)
+    try:
+        con.executemany(
+            "INSERT OR REPLACE INTO doc_vectors (chunk_id, model, dim, vec) VALUES (?,?,?,?)",
+            [(cid, model, len(vec), pack_vector(vec)) for cid, vec in items],
+        )
+        con.commit()
+    finally:
+        con.close()
 
 
 def read_stats(path: Path) -> dict:

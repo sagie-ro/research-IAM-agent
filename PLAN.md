@@ -2,7 +2,7 @@
 
 **Status:** design v3.1 — locked; Inc 0–6 + multi-turn chat + eval + router-brain refactor
 (locate · summarize · trace · clarify/fetch-context router · researcher delegates w/ retriever caps ·
-doc RAG, code-authoritative · content-hash delta indexing · eval).
+hybrid doc RAG [ada-2 semantic ⊕ keyword], code-authoritative · content-hash delta indexing · eval).
 Remaining: Inc 5 tail (HITL · external corpus · web search) · Inc 7 expansion · router answer-formatting.
 **Branch:** `claude/cool-curie-yyEpt`
 **Last updated:** 2026-06-06
@@ -176,8 +176,9 @@ CLI. Three question shapes to serve:
     unified with the graph in one file; swappable). **Optional** — see §7.
   - **Repo Map** — tree, detected entry points, dir/module roles.
   - **Doc RAG** — README/markdown/`docs/` split into heading-delimited **doc chunks** (stored in the
-    index); queried by `search_docs` for design/intent. **Code is authoritative** — docs ground
-    *intent*, never override what the code does (D16). Keyword-ranked today; semantic/vector optional (D10).
+    index); queried by `search_docs`. **Hybrid retrieval**: semantic (Azure **ada-2** embeddings in a
+    `doc_vectors` table, brute-force cosine) blended with keyword overlap, with **keyword fallback** when
+    no embedder is configured. **Code is authoritative** — docs ground *intent*, never override the code (D16).
 - **Toolbox** (LangChain tools over the index, one `Retriever` interface):
   `search_lexical` (ripgrep) · `search_semantic` (vectors) · `get_symbol` · `find_callers` ·
   `find_callees` · **`get_references`** (all usage sites of a symbol) · `find_implementations` ·
@@ -297,8 +298,8 @@ that's expected and swappable via config when more Azure deployments exist.
 - **Inc 2 — Toolbox + retriever + router fast-path → Locate (Q1).** Seed eval + reasoning trace.
 - **Inc 3 — Summarize (Q2).** Doc/structure-first overview.
 - **Inc 4 — Researcher + multi-hop Trace (Q3).** Team topology, parallel retrievers, boundary awareness.
-- **Inc 5 — RAG grounding.** ✅ **Repo-docs RAG** (heading-chunked `search_docs`, code-authoritative / D16).
-  *(Deferred tail: external professional-corpus RAG, budgeted web search, HITL interrupt.)*
+- **Inc 5 — RAG grounding.** ✅ **Repo-docs RAG** — hybrid `search_docs` (Azure ada-2 semantic ⊕ keyword,
+  fallback), code-authoritative (D16). *(Deferred tail: external professional-corpus RAG, web search, HITL.)*
 - **Inc 6 — Incremental delta indexing.** ✅ Content-hash delta → reuse unchanged files, re-parse only
   changes, re-assemble globally (`build_delta`); auto-used by `ensure_index` when a prior index exists.
 - **Inc 7 — Eval expansion + trace report.** *(Future: HTML report skill, HITL learning loop.)*
@@ -335,9 +336,12 @@ that's expected and swappable via config when more Azure deployments exist.
   not just commit diffs). Implemented Inc 6 (`build_delta`).
 - **D8** **Structured agent outputs** everywhere except the router's user-facing answer.
 - **D9** Toolbox includes **`get_references`** (usage sites of a symbol).
-- **D10** Embeddings via a **separate, pluggable provider** (Anthropic ships none): default = local code
-  embedder for the Anthropic-local phase; Azure ada-2 / Voyage optional. **Semantic retrieval is optional**
-  — falls back to lexical+structural when no embedder is configured.
+- **D10** Embeddings via a **separate, pluggable provider** (Anthropic ships none). **Wired: Azure ada-2**
+  (`AzureOpenAIEmbeddings`, same Entra-ID auth as chat) powering **hybrid `search_docs`** (semantic ⊕
+  keyword) over a `doc_vectors` table; local sentence-transformers is an optional extra. **Semantic is
+  additive** — embedded incrementally (only un-embedded chunks), cached in the index, and it **falls back
+  to keyword** when no embedder is configured or a call fails. Brute-force cosine (corpus is small → no
+  `sqlite-vec` needed; D11 store stays single-file SQLite).
 - **D11** Vector store stays **SQLite** (unified single-file index via `sqlite-vec`); Chroma evaluated and
   **deferred to future dev** (single-file-index vs. separate-store tradeoff).
 - **D12** Git ingestion uses a **lean clone** (shallow + blobless `--filter=blob:none` + sparse-checkout to

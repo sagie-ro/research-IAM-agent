@@ -30,7 +30,7 @@ def test_schema_round_trips(built_index):
     _, db = built_index
     con = sqlite3.connect(db)
     try:
-        assert con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "3"
+        assert con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "4"
         assert con.execute("SELECT COUNT(*) FROM files").fetchone()[0] >= 4
     finally:
         con.close()

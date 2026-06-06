@@ -14,6 +14,9 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..embeddings import cosine
+from ..index.store import unpack_vector
+
 _README_NAMES = ("readme.md", "readme.rst", "readme.txt", "readme")
 _SRC_GLOBS = ("*.py", "*.java")
 
@@ -25,8 +28,9 @@ class IndexHandle:
 
 
 class Toolbox:
-    def __init__(self, handle: IndexHandle) -> None:
+    def __init__(self, handle: IndexHandle, embedder=None) -> None:
         self.h = handle
+        self._embedder = embedder  # optional; enables semantic doc search when present
 
     def _con(self) -> sqlite3.Connection:
         con = sqlite3.connect(self.h.store_path)
@@ -291,14 +295,23 @@ class Toolbox:
 
     def search_docs(self, query: str, limit: int = 5) -> str:
         """Search the repository's DOCUMENTATION (README / markdown / docs) for relevant prose.
-        Returns the best-matching sections with file:line and heading. Docs explain intent and
-        design but can drift from the implementation — treat the CODE as authoritative when they
-        disagree, and confirm behavioral claims against code (read_file / the structural tools)."""
+        Hybrid: semantic (embeddings) when available, blended with keyword overlap; keyword-only
+        otherwise. Docs explain intent and design but can drift from the implementation — treat the
+        CODE as authoritative when they disagree, and confirm behavioral claims against code."""
         con = self._con()
         try:
             rows = con.execute(
-                "SELECT file_id, heading, start_line, end_line, source, text FROM doc_chunks"
+                "SELECT id, file_id, heading, start_line, end_line, source, text FROM doc_chunks"
             ).fetchall()
+            vectors: dict[int, list[float]] = {}
+            if self._embedder is not None:
+                try:
+                    vrows = con.execute(
+                        "SELECT chunk_id, vec FROM doc_vectors WHERE model=?", (self._embedder.model,)
+                    ).fetchall()
+                    vectors = {r["chunk_id"]: unpack_vector(r["vec"]) for r in vrows}
+                except sqlite3.OperationalError:
+                    vectors = {}
         except sqlite3.OperationalError:
             return "no documentation indexed for this repository"
         finally:
@@ -307,22 +320,34 @@ class Toolbox:
             return "no documentation indexed for this repository"
 
         terms = {t for t in re.findall(r"\w+", query.lower()) if len(t) > 2}
-        if not terms:
-            return "query too short to search documentation"
+        keyword = {
+            r["id"]: sum((r["text"] or "").lower().count(t) for t in terms)
+            + 3 * sum(1 for t in terms if t in (r["heading"] or "").lower())
+            for r in rows
+        }
 
-        scored: list[tuple[int, sqlite3.Row]] = []
-        for r in rows:
-            heading = (r["heading"] or "").lower()
-            text = (r["text"] or "").lower()
-            score = sum(text.count(t) for t in terms) + 3 * sum(1 for t in terms if t in heading)
-            if score:
-                scored.append((score, r))
-        if not scored:
+        semantic: dict[int, float] = {}
+        if vectors and self._embedder is not None:
+            try:
+                qv = self._embedder.embed_query(query)
+                semantic = {r["id"]: max(0.0, cosine(qv, vectors[r["id"]])) for r in rows if r["id"] in vectors}
+            except Exception:
+                semantic = {}
+
+        def _norm(scores: dict[int, float]) -> dict[int, float]:
+            top = max(scores.values(), default=0.0) or 1.0
+            return {k: v / top for k, v in scores.items()}
+
+        nk, ns = _norm(keyword), _norm(semantic)
+        combined = {r["id"]: nk.get(r["id"], 0.0) + ns.get(r["id"], 0.0) for r in rows}
+        ranked = sorted(rows, key=lambda r: combined[r["id"]], reverse=True)
+        top = [r for r in ranked if combined[r["id"]] > 0][:limit]
+        if not top:
             return f"no documentation matched '{query}' (try the code tools instead)"
-        scored.sort(key=lambda x: -x[0])
 
-        out = ["documentation matches (intent/design — verify against code; code is authoritative):"]
-        for _, r in scored[:limit]:
+        mode = "semantic+keyword" if semantic else "keyword"
+        out = [f"documentation matches ({mode}; intent/design — verify against code; code is authoritative):"]
+        for r in top:
             tag = "doc" if r["source"] == "repo" else r["source"]
             snippet = " ".join((r["text"] or "").split())[:300]
             out.append(f"  [{tag}] {r['file_id']}:{r['start_line']}-{r['end_line']} · {r['heading']}\n    {snippet}")

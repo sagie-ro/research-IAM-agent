@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     retriever_model: str = "claude-sonnet-4-6"
     researcher_model: str = ""  # heavy Anthropic tier — set in .env
 
-    # Embeddings (separate, pluggable provider; optional in Inc 0).
+    # Embeddings (separate, pluggable provider). "azure_openai" (ada-2) | "local" | "none".
     embedding_provider: str = "local"
     embedding_model: str = "BAAI/bge-small-en-v1.5"
 
@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     # Azure OpenAI (boilerplate AD service-principal auth).
     azure_openai_endpoint: str | None = None
     azure_openai_api_version: str | None = None
+    azure_openai_model_ada2: str | None = None  # embedding deployment (text-embedding-ada-002)
 
     # Scope-guard / abuse budgets (principle 7).
     max_question_chars: int = 4000
