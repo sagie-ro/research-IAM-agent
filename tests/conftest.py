@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import types
 
 import pytest
 
@@ -34,6 +35,33 @@ class FakeEmbedder:
 @pytest.fixture
 def fake_embedder():
     return FakeEmbedder()
+
+
+class _StubAI:
+    def __init__(self, tool_calls):
+        self.tool_calls = tool_calls
+        self.content = ""
+
+
+class StubModel:
+    """Scripted chat model for agent-loop tests: tool_calls per turn + a fixed structured output."""
+
+    def __init__(self, tool_calls_fn, structured_obj):
+        self._tcf, self._obj = tool_calls_fn, structured_obj
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        return _StubAI(self._tcf())
+
+    def with_structured_output(self, schema):
+        return types.SimpleNamespace(invoke=lambda msgs: self._obj)
+
+
+@pytest.fixture
+def make_stub_model():
+    return StubModel
 
 PY_SRC = """\
 import os

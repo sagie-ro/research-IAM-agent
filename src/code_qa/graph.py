@@ -29,6 +29,7 @@ from .config import Settings
 from .llm import ModelFactory
 from .retrieval import Retrieval, run_researcher, run_retriever
 from .scope_guard import deterministic_guard
+from .websearch import build_web_search
 
 ROUTER_PERSONA = (
     "You are the router and the single voice of a code Q&A assistant for ONE repository.\n"
@@ -105,6 +106,8 @@ def _history_messages(history: list, limit: int = 8) -> list:
 
 
 def build_graph(settings: Settings, factory: ModelFactory, retrieval: Retrieval | None = None):
+    web_search = build_web_search(settings)  # optional; None unless configured
+
     def _present(state: GraphState, payload: str, extra: str = "") -> str:
         router = factory.get("router")
         msg = (f"Conversation so far:\n{_render_history(state.get('history', []))}\n\n"
@@ -189,6 +192,8 @@ def build_graph(settings: Settings, factory: ModelFactory, retrieval: Retrieval 
             max_parallel=settings.max_parallel_retrievers,
             retriever_max_steps=settings.retriever_max_steps,
             max_total=settings.max_retrievers_per_trace,
+            web_search=web_search,
+            web_search_max=settings.web_search_max,
         )
         return {"report": report.model_dump(),
                 "trace": events + [{"agent": "researcher", "event": "report",

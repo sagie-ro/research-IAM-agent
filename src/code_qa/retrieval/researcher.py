@@ -109,8 +109,9 @@ def _fan_out(subquestions, retriever_fn, trace: list, start_index: int, max_para
 
 def run_researcher(researcher_model, retriever_model, retrieval, question: str, trace: list,
                    max_steps: int = 8, max_parallel: int = 6, retriever_max_steps: int = 6,
-                   max_total: int = 50) -> TraceReport:
+                   max_total: int = 50, web_search=None, web_search_max: int = 3) -> TraceReport:
     counter = {"n": 0}
+    web_calls = {"n": 0}
 
     def spawn_retrievers(subquestions: list[str]) -> str:
         remaining = max_total - counter["n"]
@@ -135,6 +136,23 @@ def run_researcher(researcher_model, retriever_model, retrieval, question: str, 
     )
     # Planning/structural tools only — code-reading/searching is delegated to retrievers.
     tools = [t for t in retrieval.tools if t.name not in _DELEGATED] + [spawn_tool]
+
+    if web_search is not None:
+        def web_search_tool(query: str) -> str:
+            if web_calls["n"] >= web_search_max:
+                return f"web search budget exhausted ({web_search_max} per question); reason from what you have."
+            web_calls["n"] += 1
+            trace.append({"agent": "researcher", "event": "web_search", "query": query, "n": web_calls["n"]})
+            return web_search(query)
+
+        tools.append(StructuredTool.from_function(
+            web_search_tool, name="web_search",
+            description=(
+                f"Search the PUBLIC WEB for standards, library docs, or background (budgeted: "
+                f"{web_search_max} per question). External knowledge — cite as web; it NEVER overrides "
+                "the repo's actual code. Use only when the repo and its docs are insufficient."
+            ),
+        ))
     tool_map = {t.name: t for t in tools}
     bound = researcher_model.bind_tools(tools)
 

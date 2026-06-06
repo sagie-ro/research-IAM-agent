@@ -1,9 +1,9 @@
 # Code-Q&A Agent — Project Plan (living document)
 
-**Status:** design v3.1 — locked; Inc 0–6 + multi-turn chat + eval + router-brain refactor
-(locate · summarize · trace · clarify/fetch-context router · researcher delegates w/ retriever caps ·
-hybrid doc RAG [ada-2 semantic ⊕ keyword], code-authoritative · content-hash delta indexing · eval).
-Remaining: Inc 5 tail (HITL · external corpus · web search) · Inc 7 expansion · router answer-formatting.
+**Status:** design v3.1 — locked; Inc 0–6 + Inc 5 RAG/external-knowledge + multi-turn chat + eval
+(locate · summarize · trace · clarify/fetch-context router · researcher delegates w/ caps · hybrid doc RAG
+[ada-2 ⊕ keyword] + professional corpus + budgeted web search, code-authoritative · content-hash delta · eval).
+Remaining: HITL (skipped per request) · Inc 7 expansion · router answer-formatting.
 **Branch:** `claude/cool-curie-yyEpt`
 **Last updated:** 2026-06-06
 
@@ -197,9 +197,9 @@ CLI. Three question shapes to serve:
     (router or researcher).
   - **Researcher** (heavy LLM) — a **pure reasoner that delegates code-reading to retrievers** (no
     `read_file`/`search_lexical`; D15); deep reasoning + **structured conclusions**; orchestrates retrievers
-    as a team (back-and-forth, parallel fan-out); optional RAG over a user-fed professional corpus; budgeted web
-    search (executed via a retriever); raises a **HITL interrupt** with a structured report when
-    inconclusive; **returns a structured report up to the router** for final presentation.
+    as a team (back-and-forth, parallel fan-out); optional RAG over a user-fed professional corpus
+    (`search_corpus`) and **budgeted web search** (`web_search`, capped per question) for external knowledge;
+    **returns a structured report up to the router** for final presentation. *(HITL interrupt = future.)*
   - **Handoffs are typed** (Pydantic schemas) everywhere; only the router's user-facing message is NL.
 - **Conversation/state** — multi-turn REPL; session state = history + a **working set** of retrieved
   symbols/files so follow-ups are cheap. LangGraph checkpointer persists state (also enables HITL).
@@ -298,9 +298,9 @@ that's expected and swappable via config when more Azure deployments exist.
 - **Inc 2 — Toolbox + retriever + router fast-path → Locate (Q1).** Seed eval + reasoning trace.
 - **Inc 3 — Summarize (Q2).** Doc/structure-first overview.
 - **Inc 4 — Researcher + multi-hop Trace (Q3).** Team topology, parallel retrievers, boundary awareness.
-- **Inc 5 — RAG grounding.** ✅ **Repo-docs RAG** (hybrid `search_docs`, ada-2 ⊕ keyword) + ✅ **external
-  professional-corpus RAG** (`search_corpus`, separate store), code-authoritative (D16). *(Deferred: web
-  search [next] · HITL [skipped per request].)*
+- **Inc 5 — RAG grounding + external knowledge.** ✅ Repo-docs RAG (hybrid `search_docs`, ada-2 ⊕ keyword) ·
+  ✅ external professional-corpus RAG (`search_corpus`) · ✅ **budgeted web search** (`web_search`, Tavily,
+  capped/question) — all code-authoritative (D16/D17). *(HITL skipped per request → future.)*
 - **Inc 6 — Incremental delta indexing.** ✅ Content-hash delta → reuse unchanged files, re-parse only
   changes, re-assemble globally (`build_delta`); auto-used by `ensure_index` when a prior index exists.
 - **Inc 7 — Eval expansion + trace report.** *(Future: HTML report skill, HITL learning loop.)*
@@ -362,8 +362,11 @@ that's expected and swappable via config when more Azure deployments exist.
 - **D16** **Docs ground intent; code is authoritative.** Repo documentation (README/markdown/`docs/`) is
   chunked by heading into the index and retrieved via `search_docs` to explain *why*/design. Docs can
   drift or be aspirational, so behavioral claims are **verified against code, and code wins on conflict**.
-  Both researcher and retriever may consult docs (it is not a `_DELEGATED` code-reading tool). Retrieval is
-  keyword-ranked for now; a semantic/vector backend is the optional upgrade (D10/D11).
+  Both researcher and retriever may consult docs (it is not a `_DELEGATED` code-reading tool).
+- **D17** **External knowledge is budgeted and subordinate to code.** The professional corpus
+  (`search_corpus`, separate store) and **web search** (`web_search`, capped at `web_search_max`/question,
+  Tavily via stdlib `urllib`, off by default) supply standards/background but are **provenance-tagged as
+  external and never override the repo's actual code** (extends D16). HITL learning loop deferred.
 
 ## 11. Assumptions log
 
