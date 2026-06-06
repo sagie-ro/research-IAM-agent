@@ -299,8 +299,9 @@ that's expected and swappable via config when more Azure deployments exist.
 - **Inc 3 — Summarize (Q2).** Doc/structure-first overview.
 - **Inc 4 — Researcher + multi-hop Trace (Q3).** Team topology, parallel retrievers, boundary awareness.
 - **Inc 5 — RAG grounding + external knowledge.** ✅ Repo-docs RAG (hybrid `search_docs`, ada-2 ⊕ keyword) ·
-  ✅ external professional-corpus RAG (`search_corpus`) · ✅ **budgeted web search** (`web_search`, Tavily,
-  capped/question) — all code-authoritative (D16/D17). *(HITL skipped per request → future.)*
+  ✅ external professional-corpus RAG (`search_corpus`) · ✅ **budgeted web search** (`web_search`, keyless
+  DuckDuckGo by default / Tavily optional, capped/question) — all code-authoritative (D16/D17).
+  *(HITL skipped per request → future.)*
 - **Inc 6 — Incremental delta indexing.** ✅ Content-hash delta → reuse unchanged files, re-parse only
   changes, re-assemble globally (`build_delta`); auto-used by `ensure_index` when a prior index exists.
 - **Inc 7 — Eval expansion + trace report.** *(Future: HTML report skill, HITL learning loop.)*
@@ -364,9 +365,11 @@ that's expected and swappable via config when more Azure deployments exist.
   drift or be aspirational, so behavioral claims are **verified against code, and code wins on conflict**.
   Both researcher and retriever may consult docs (it is not a `_DELEGATED` code-reading tool).
 - **D17** **External knowledge is budgeted and subordinate to code.** The professional corpus
-  (`search_corpus`, separate store) and **web search** (`web_search`, capped at `web_search_max`/question,
-  Tavily via stdlib `urllib`, off by default) supply standards/background but are **provenance-tagged as
-  external and never override the repo's actual code** (extends D16). HITL learning loop deferred.
+  (`search_corpus`, separate store) and **web search** (`web_search`, capped at `web_search_max`/question)
+  supply standards/background but are **provenance-tagged as external and never override the repo's actual
+  code** (extends D16). Web search is **keyless by default** — DuckDuckGo Instant Answer over stdlib
+  `urllib` (no dependency/key; concept/standards-oriented); Tavily is a keyed upgrade; `none` disables
+  egress. Pluggable seam mirrors the LLM/embeddings providers. HITL learning loop deferred.
 
 ## 11. Assumptions log
 

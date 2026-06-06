@@ -51,11 +51,11 @@ class Settings(BaseSettings):
     # External professional-corpus RAG (optional; a directory of reference docs).
     corpus_path: str | None = None
 
-    # Budgeted web search for the researcher (optional). Provider: "none" | "tavily".
-    web_search_provider: str = "none"
+    # Budgeted web search for the researcher. Provider: "duckduckgo" (keyless, default) | "tavily" | "none".
+    web_search_provider: str = "duckduckgo"
     web_search_results: int = 5  # results per query
     web_search_max: int = 3  # budget: max web searches per trace
-    tavily_api_key: str | None = None
+    tavily_api_key: str | None = None  # only needed for provider="tavily"
 
     # Scope-guard / abuse budgets (principle 7).
     max_question_chars: int = 4000
