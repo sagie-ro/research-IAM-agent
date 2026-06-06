@@ -1,0 +1,247 @@
+"""Toolbox — read-only queries over the structural index + lexical search.
+
+Each public method returns a compact, citation-friendly string (file:line) suitable
+both for an LLM tool observation and for a human. Everything here is deterministic
+and key-free; the retriever agent (retriever.py) drives these tools.
+"""
+
+from __future__ import annotations
+
+import shutil
+import sqlite3
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+
+_README_NAMES = ("readme.md", "readme.rst", "readme.txt", "readme")
+_SRC_GLOBS = ("*.py", "*.java")
+
+
+@dataclass
+class IndexHandle:
+    repo_root: Path
+    store_path: Path
+
+
+class Toolbox:
+    def __init__(self, handle: IndexHandle) -> None:
+        self.h = handle
+
+    def _con(self) -> sqlite3.Connection:
+        con = sqlite3.connect(self.h.store_path)
+        con.row_factory = sqlite3.Row
+        return con
+
+    def _label(self, con: sqlite3.Connection, sid: str) -> str:
+        row = con.execute(
+            "SELECT qualname, file_id, start_line FROM symbols WHERE id=?", (sid,)
+        ).fetchone()
+        if row:
+            return f"{row['qualname']} ({row['file_id']}:{row['start_line']})"
+        return sid  # file-scope source
+
+    def _symbol_ids(self, con: sqlite3.Connection, name: str) -> list[str]:
+        return [r["id"] for r in con.execute(
+            "SELECT id FROM symbols WHERE name=? OR qualname=?", (name, name)
+        )]
+
+    # --- tools ---
+
+    def repo_overview(self) -> str:
+        con = self._con()
+        try:
+            meta = dict(con.execute("SELECT key, value FROM meta").fetchall())
+            langs = con.execute(
+                "SELECT language, COUNT(*) FROM files GROUP BY language ORDER BY 2 DESC"
+            ).fetchall()
+            n_sym = con.execute("SELECT COUNT(*) FROM symbols").fetchone()[0]
+            entries = con.execute(
+                "SELECT qualname, file_id FROM symbols WHERE is_entry=1 ORDER BY file_id LIMIT 12"
+            ).fetchall()
+        finally:
+            con.close()
+        out = [
+            f"repo: {Path(meta.get('repo_path', '')).name} @ {(meta.get('sha') or 'live')[:8]}",
+            "languages: " + ", ".join(f"{lang}:{c}" for lang, c in langs),
+            f"symbols: {n_sym}",
+            "entry points:",
+        ]
+        out += [f"  - {r['file_id']} :: {r['qualname']}" for r in entries] or ["  (none detected)"]
+        readme = self._read_readme()
+        if readme:
+            out += ["", "README (head):", readme]
+        return "\n".join(out)
+
+    def get_symbol(self, name: str) -> str:
+        """Find symbol definitions (class/method/function) by name or qualified name."""
+        con = self._con()
+        try:
+            rows = con.execute(
+                "SELECT kind, qualname, file_id, start_line, end_line FROM symbols "
+                "WHERE name=? OR qualname=? ORDER BY (name=?) DESC LIMIT 25",
+                (name, name, name),
+            ).fetchall()
+        finally:
+            con.close()
+        if not rows:
+            return f"no symbol named '{name}'"
+        return "\n".join(
+            f"{r['kind']} {r['qualname']} — {r['file_id']}:{r['start_line']}-{r['end_line']}"
+            for r in rows
+        )
+
+    def find_callers(self, name: str) -> str:
+        """List call sites that invoke the given symbol (resolved calls only)."""
+        con = self._con()
+        try:
+            ids = self._symbol_ids(con, name)
+            if not ids:
+                return f"no symbol named '{name}'"
+            ph = ",".join("?" * len(ids))
+            rows = con.execute(
+                f"SELECT DISTINCT src_id FROM edges WHERE type='calls' AND dst_id IN ({ph}) LIMIT 40",
+                ids,
+            ).fetchall()
+            labels = [self._label(con, r["src_id"]) for r in rows]
+        finally:
+            con.close()
+        return ("callers of '%s':\n" % name + "\n".join(f"  {x}" for x in labels)) if labels else f"no resolved callers of '{name}'"
+
+    def find_callees(self, name: str) -> str:
+        """List symbols called by the given symbol (resolved calls only)."""
+        con = self._con()
+        try:
+            ids = self._symbol_ids(con, name)
+            if not ids:
+                return f"no symbol named '{name}'"
+            ph = ",".join("?" * len(ids))
+            rows = con.execute(
+                f"SELECT DISTINCT dst_id FROM edges WHERE type='calls' AND src_id IN ({ph}) "
+                f"AND dst_id IS NOT NULL LIMIT 40",
+                ids,
+            ).fetchall()
+            labels = [self._label(con, r["dst_id"]) for r in rows]
+        finally:
+            con.close()
+        return ("callees of '%s':\n" % name + "\n".join(f"  {x}" for x in labels)) if labels else f"no resolved callees of '{name}'"
+
+    def get_references(self, name: str) -> str:
+        """Find usage sites of a name across the repo (any edge referencing it)."""
+        con = self._con()
+        try:
+            rows = con.execute(
+                "SELECT src_id, type, dst_id FROM edges WHERE dst_name=? LIMIT 50", (name,)
+            ).fetchall()
+            items = [f"  [{r['type']}{'*' if r['dst_id'] else ''}] {self._label(con, r['src_id'])}" for r in rows]
+        finally:
+            con.close()
+        if not items:
+            return f"no references to '{name}' in the symbol graph (try search_lexical)"
+        return f"references to '{name}' (* = resolved):\n" + "\n".join(items)
+
+    def find_implementations(self, name: str) -> str:
+        """Find types that extend/implement the given class or interface name."""
+        con = self._con()
+        try:
+            rows = con.execute(
+                "SELECT src_id, type FROM edges WHERE dst_name=? AND type IN ('extends','implements') LIMIT 40",
+                (name,),
+            ).fetchall()
+            items = [f"  [{r['type']}] {self._label(con, r['src_id'])}" for r in rows]
+        finally:
+            con.close()
+        return (f"subtypes of '{name}':\n" + "\n".join(items)) if items else f"no extends/implements of '{name}'"
+
+    def get_call_path(self, name: str) -> str:
+        """Show the precomputed call-path (call tree) from an entry point by name."""
+        con = self._con()
+        try:
+            ent = con.execute(
+                "SELECT id, qualname FROM symbols WHERE (name=? OR qualname=?) AND is_entry=1 LIMIT 1",
+                (name, name),
+            ).fetchone()
+            if ent is None:
+                return f"'{name}' is not a detected entry point. Use find_callees to walk calls."
+            rows = con.execute(
+                "SELECT to_id, depth FROM call_paths WHERE entry_id=? ORDER BY depth, to_id LIMIT 60",
+                (ent["id"],),
+            ).fetchall()
+            lines = [f"  depth {r['depth']}: {self._label(con, r['to_id'])}" for r in rows]
+        finally:
+            con.close()
+        head = f"call-path from entry {ent['qualname']}:"
+        return head + "\n" + ("\n".join(lines) if lines else "  (no outgoing resolved calls)")
+
+    def read_file(self, path: str, start_line: int = 1, end_line: int = 200) -> str:
+        """Read a slice of a repo file with line numbers (read-only)."""
+        root = self.h.repo_root.resolve()
+        target = (root / path).resolve()
+        if not str(target).startswith(str(root)):
+            return "refused: path outside the repository"
+        if not target.is_file():
+            return f"not a file: {path}"
+        start = max(1, start_line)
+        end = max(start, min(end_line, start + 400))
+        out = []
+        try:
+            with target.open("r", encoding="utf-8", errors="replace") as fh:
+                for i, line in enumerate(fh, 1):
+                    if i < start:
+                        continue
+                    if i > end:
+                        break
+                    out.append(f"{i:5d}  {line.rstrip()}")
+        except Exception as exc:
+            return f"read error: {exc}"
+        return f"{path}:{start}-{end}\n" + "\n".join(out)
+
+    def search_lexical(self, pattern: str) -> str:
+        """Regex/keyword search across source files (ripgrep, with a Python fallback)."""
+        root = self.h.repo_root
+        rg = shutil.which("rg")
+        if rg:
+            try:
+                proc = subprocess.run(
+                    [rg, "--line-number", "--no-heading", "--color", "never",
+                     "--max-count", "5", "-e", pattern, str(root)],
+                    capture_output=True, text=True, timeout=20,
+                )
+                lines = proc.stdout.splitlines()[:40]
+                rel = [ln.replace(str(root) + "/", "") for ln in lines]
+                return ("matches:\n" + "\n".join(rel)) if rel else f"no matches for '{pattern}'"
+            except Exception:
+                pass
+        return self._python_grep(pattern)
+
+    # --- helpers ---
+
+    def _python_grep(self, pattern: str) -> str:
+        import re
+        try:
+            rx = re.compile(pattern)
+        except re.error:
+            rx = re.compile(re.escape(pattern))
+        root = self.h.repo_root
+        hits: list[str] = []
+        for glob in _SRC_GLOBS:
+            for path in root.rglob(glob):
+                try:
+                    for i, line in enumerate(path.read_text("utf-8", "replace").splitlines(), 1):
+                        if rx.search(line):
+                            hits.append(f"{path.relative_to(root)}:{i}:{line.strip()[:160]}")
+                            if len(hits) >= 40:
+                                return "matches:\n" + "\n".join(hits)
+                except Exception:
+                    continue
+        return ("matches:\n" + "\n".join(hits)) if hits else f"no matches for '{pattern}'"
+
+    def _read_readme(self) -> str | None:
+        for child in self.h.repo_root.iterdir():
+            if child.is_file() and child.name.lower() in _README_NAMES:
+                try:
+                    text = child.read_text("utf-8", "replace")
+                except Exception:
+                    return None
+                lines = [ln for ln in text.splitlines()][:30]
+                return "\n".join(lines)[:1500]
+        return None

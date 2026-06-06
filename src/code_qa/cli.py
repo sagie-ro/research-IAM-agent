@@ -1,8 +1,9 @@
-"""code-qa CLI: `chat` (default), `index`, `inspect`."""
+"""code-qa CLI: `chat` (default), `index`, `inspect`, `eval`."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from dotenv import load_dotenv
@@ -13,9 +14,10 @@ from .config import Settings
 from .graph import build_graph
 from .index import service
 from .llm import ModelFactory
+from .retrieval import IndexHandle, build_retrieval
 from .source import RepoSource
 
-_COMMANDS = {"chat", "index", "inspect"}
+_COMMANDS = {"chat", "index", "inspect", "eval"}
 
 
 def _looks_like_url(s: str) -> bool:
@@ -32,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     command = "chat"
     if argv and argv[0] in _COMMANDS:
         command = argv.pop(0)
-    return {"chat": _chat, "index": _index, "inspect": _inspect}[command](argv)
+    return {"chat": _chat, "index": _index, "inspect": _inspect, "eval": _eval}[command](argv)
 
 
 def _chat(argv: list[str]) -> int:
@@ -40,25 +42,40 @@ def _chat(argv: list[str]) -> int:
     parser.add_argument("--repo", help="Local path or git URL of the target repository.")
     parser.add_argument("--ref", help="Git ref/branch (use with a git URL).")
     parser.add_argument("--once", help="Ask a single question, print the answer, and exit.")
+    parser.add_argument("--show-trace", action="store_true", help="Print the reasoning trace after each answer.")
     args = parser.parse_args(argv)
 
     console = Console()
     settings = Settings()
     factory = ModelFactory(settings)
 
-    repo_summary: str | None = None
+    retrieval = None
     if args.repo:
         source = _resolve_repo(args.repo, args.ref)
-        repo_summary = source.summary()
-        console.print(f"[green]Loaded[/] {repo_summary}")
+        console.print(f"[green]Loaded[/] {source.summary()} — building/loading index …")
+        path, built = service.ensure_index(source)
+        retrieval = build_retrieval(IndexHandle(repo_root=source.path, store_path=path))
+        console.print(f"[dim]{'built' if built else 'cached'} index -> {path}[/]")
+    else:
+        console.print("[yellow]No --repo given; running in chat-only mode (no code retrieval).[/]")
 
-    app = build_graph(settings, factory)
+    app = build_graph(settings, factory, retrieval)
 
-    def ask(question: str) -> str:
-        return app.invoke({"question": question, "repo_summary": repo_summary}).get("answer", "")
+    def ask(question: str) -> None:
+        result = app.invoke({"question": question, "trace": []})
+        console.print(result.get("answer", ""))
+        if result.get("findings", {}).get("findings"):
+            console.print("[dim]— citations —[/]")
+            for f in result["findings"]["findings"]:
+                loc = f"{f['file']}:{f['line_start']}" + (f"-{f['line_end']}" if f.get("line_end") else "")
+                console.print(f"  [cyan]{loc}[/] {f.get('symbol') or ''} — {f.get('note', '')}")
+        if args.show_trace:
+            console.print("[dim]— trace —[/]")
+            for ev in result.get("trace", []):
+                console.print(f"  [dim]{json.dumps(ev)}[/]")
 
     if args.once is not None:
-        console.print(ask(args.once))
+        ask(args.once)
         return 0
 
     console.print("[bold]code-qa[/] — ask about the codebase (Ctrl-D to exit).")
@@ -69,7 +86,7 @@ def _chat(argv: list[str]) -> int:
             console.print("\nbye")
             return 0
         if question.strip():
-            console.print(ask(question))
+            ask(question)
 
 
 def _index(argv: list[str]) -> int:
@@ -102,6 +119,15 @@ def _inspect(argv: list[str]) -> int:
         console.print(f"[dim]built index -> {path}[/]")
     _render_stats(console, service.stats(path))
     return 0
+
+
+def _eval(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="code-qa eval", description="Run the eval seed (needs an LLM key).")
+    parser.add_argument("--only", help="Run only cases whose id contains this substring.")
+    args = parser.parse_args(argv)
+    from .eval.runner import run
+
+    return run(only=args.only)
 
 
 def _render_stats(console: Console, s: dict) -> None:
