@@ -1,4 +1,4 @@
-"""code-qa CLI: `chat` (default), `index`, `inspect`, `eval`."""
+"""code-qa CLI: `chat` (default, conversational), `index`, `inspect`, `eval`."""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ from .retrieval import IndexHandle, build_retrieval
 from .source import RepoSource
 
 _COMMANDS = {"chat", "index", "inspect", "eval"}
+_QUIT = {"/exit", "/quit", "exit", "quit"}
+_HISTORY_TURNS = 24  # keep the last N messages (user+assistant) in context
 
 
 def _looks_like_url(s: str) -> bool:
@@ -45,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _chat(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="code-qa chat", description="Ask questions about a repository.")
+    parser = argparse.ArgumentParser(prog="code-qa chat", description="Converse about a repository.")
     parser.add_argument("--repo", help="Local path or git URL of the target repository.")
     parser.add_argument("--ref", help="Git ref/branch (use with a git URL).")
     parser.add_argument("--once", help="Ask a single question, print the answer, and exit.")
@@ -67,45 +69,66 @@ def _chat(argv: list[str]) -> int:
         console.print("[yellow]No --repo given; running in chat-only mode (no code retrieval).[/]")
 
     app = build_graph(settings, factory, retrieval)
+    history: list[dict] = []
 
     def ask(question: str) -> None:
-        result = app.invoke({"question": question, "trace": []})
-        console.print(result.get("answer", ""))
-        if result.get("findings", {}).get("findings"):
-            console.print("[dim]— citations —[/]")
-            for f in result["findings"]["findings"]:
-                loc = f"{f['file']}:{f['line_start']}" + (f"-{f['line_end']}" if f.get("line_end") else "")
-                console.print(f"  [cyan]{loc}[/] {f.get('symbol') or ''} — {f.get('note', '')}")
-        report = result.get("report")
-        if report and report.get("steps"):
-            console.print("[dim]— flow —[/]")
-            for st in report["steps"]:
-                calls = f" → {', '.join(st.get('calls', []))}" if st.get("calls") else ""
-                console.print(f"  [cyan]{st.get('location', '')}[/] {st.get('symbol', '')}{calls}")
-            for note in report.get("boundary_notes", []):
-                console.print(f"  [yellow]boundary:[/] {note}")
+        result = app.invoke({"question": question, "history": history, "trace": []})
+        answer = result.get("answer", "")
+        console.print(answer)
+        _render_evidence(console, result)
         if args.show_trace:
-            console.print("[dim]— trace (agent · event) —[/]")
-            for ev in result.get("trace", []):
-                agent = ev.get("agent", "-")
-                event = ev.get("event", "")
-                rest = {k: v for k, v in ev.items() if k not in ("agent", "event")}
-                detail = json.dumps(rest) if rest else ""
-                console.print(f"  [magenta]{agent:<12}[/] [bold]{event}[/] [dim]{detail}[/]")
+            _render_trace(console, result.get("trace", []))
+        history.append({"role": "user", "content": question})
+        history.append({"role": "assistant", "content": answer})
+        if len(history) > _HISTORY_TURNS:
+            del history[: len(history) - _HISTORY_TURNS]
 
     if args.once is not None:
         ask(args.once)
         return 0
 
-    console.print("[bold]code-qa[/] — ask about the codebase (Ctrl-D to exit).")
+    console.print("[bold]code-qa[/] — conversational. Ask follow-ups; [cyan]/reset[/] clears, [cyan]/exit[/] quits.")
     while True:
         try:
-            question = console.input("[cyan]>[/] ")
+            question = console.input("[cyan]you ›[/] ").strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\nbye")
             return 0
-        if question.strip():
-            ask(question)
+        if not question:
+            continue
+        if question in _QUIT:
+            console.print("bye")
+            return 0
+        if question == "/reset":
+            history.clear()
+            console.print("[dim](conversation reset)[/]")
+            continue
+        ask(question)
+
+
+def _render_evidence(console: Console, result: dict) -> None:
+    if result.get("findings", {}).get("findings"):
+        console.print("[dim]— citations —[/]")
+        for f in result["findings"]["findings"]:
+            loc = f"{f['file']}:{f['line_start']}" + (f"-{f['line_end']}" if f.get("line_end") else "")
+            console.print(f"  [cyan]{loc}[/] {f.get('symbol') or ''} — {f.get('note', '')}")
+    report = result.get("report")
+    if report and report.get("steps"):
+        console.print("[dim]— flow —[/]")
+        for st in report["steps"]:
+            calls = f" → {', '.join(st.get('calls', []))}" if st.get("calls") else ""
+            console.print(f"  [cyan]{st.get('location', '')}[/] {st.get('symbol', '')}{calls}")
+        for note in report.get("boundary_notes", []):
+            console.print(f"  [yellow]boundary:[/] {note}")
+
+
+def _render_trace(console: Console, trace: list) -> None:
+    console.print("[dim]— trace (agent · event) —[/]")
+    for ev in trace:
+        agent = ev.get("agent", "-")
+        event = ev.get("event", "")
+        rest = {k: v for k, v in ev.items() if k not in ("agent", "event")}
+        console.print(f"  [magenta]{agent:<12}[/] [bold]{event}[/] [dim]{json.dumps(rest) if rest else ''}[/]")
 
 
 def _index(argv: list[str]) -> int:
