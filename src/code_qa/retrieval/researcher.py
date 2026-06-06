@@ -98,18 +98,25 @@ def _fan_out(subquestions, retriever_fn, trace: list, start_index: int, max_para
 
 
 def run_researcher(researcher_model, retriever_model, retrieval, question: str, trace: list,
-                   max_steps: int = 8, max_parallel: int = 3, retriever_max_steps: int = 6) -> TraceReport:
+                   max_steps: int = 8, max_parallel: int = 6, retriever_max_steps: int = 6,
+                   max_total: int = 50) -> TraceReport:
     counter = {"n": 0}
 
     def spawn_retrievers(subquestions: list[str]) -> str:
+        remaining = max_total - counter["n"]
+        if remaining <= 0:
+            return (f"Retriever budget exhausted ({max_total} per question). Stop spawning and "
+                    "synthesize your trace report from the findings gathered so far.")
+        width = min(max_parallel, remaining)
+        valid = [s for s in subquestions if isinstance(s, str) and s.strip()]
         start = counter["n"] + 1
-        counter["n"] += min(len(subquestions), max_parallel)
+        counter["n"] += min(len(valid), width)
 
         def retriever_fn(subq: str, agent: str, events: list) -> Findings:
             return run_retriever(retriever_model, retrieval.tools, subq, retrieval.overview,
                                  events, agent=agent, max_steps=retriever_max_steps)
 
-        return _fan_out(subquestions, retriever_fn, trace, start, max_parallel)
+        return _fan_out(subquestions, retriever_fn, trace, start, width)
 
     spawn_tool = StructuredTool.from_function(
         spawn_retrievers, name="spawn_retrievers",
@@ -121,8 +128,14 @@ def run_researcher(researcher_model, retriever_model, retrieval, question: str, 
     tool_map = {t.name: t for t in tools}
     bound = researcher_model.bind_tools(tools)
 
+    budget = (
+        f"\n\nBudget: most questions need ONE well-planned parallel batch (up to {max_parallel} "
+        f"sub-questions); spawn another batch only to fill a genuine gap, and never re-investigate "
+        f"ground a previous batch already covered. Hard limit {max_total} retrievers per question. "
+        "Stop and synthesize as soon as you can answer."
+    )
     messages = [
-        SystemMessage(content=f"{RESEARCHER_SYSTEM}\n\nRepository overview:\n{retrieval.overview}"),
+        SystemMessage(content=f"{RESEARCHER_SYSTEM}\n\nRepository overview:\n{retrieval.overview}{budget}"),
         HumanMessage(content=question),
     ]
     for _ in range(max_steps):

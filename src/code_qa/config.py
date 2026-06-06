@@ -51,7 +51,8 @@ class Settings(BaseSettings):
     max_question_chars: int = 4000
     retriever_max_steps: int = 6  # tool-call budget per retriever worker
     researcher_max_steps: int = 8  # tool-call budget for the researcher (trace questions)
-    max_parallel_retrievers: int = 3  # fan-out cap per spawn_retrievers call
+    max_parallel_retrievers: int = 6  # fan-out width cap per spawn_retrievers call
+    max_retrievers_per_trace: int = 50  # hard ceiling on total retrievers spawned per trace
     max_context_fetches: int = 2  # how many times the router may fetch code before deciding
 
     def role(self, name: str) -> RoleModel:

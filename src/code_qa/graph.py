@@ -188,6 +188,7 @@ def build_graph(settings: Settings, factory: ModelFactory, retrieval: Retrieval 
             max_steps=settings.researcher_max_steps,
             max_parallel=settings.max_parallel_retrievers,
             retriever_max_steps=settings.retriever_max_steps,
+            max_total=settings.max_retrievers_per_trace,
         )
         return {"report": report.model_dump(),
                 "trace": events + [{"agent": "researcher", "event": "report",
