@@ -64,7 +64,7 @@ def _chat(argv: list[str]) -> int:
         console.print(f"[green]Loaded[/] {source.summary()} — building/loading index …")
         path, built = service.ensure_index(source)
         retrieval = build_retrieval(IndexHandle(repo_root=source.path, store_path=path))
-        console.print(f"[dim]{'built' if built else 'cached'} index -> {path}[/]")
+        console.print(f"[dim]{'built' if built else 'cached'} index{_delta_note(path) if built else ''} -> {path}[/]")
     else:
         console.print("[yellow]No --repo given; running in chat-only mode (no code retrieval).[/]")
 
@@ -173,12 +173,23 @@ def _eval(argv: list[str]) -> int:
     return run(only=args.only, save=args.save)
 
 
+def _delta_note(path) -> str:
+    meta = service.stats(path)["meta"]
+    if "delta_reparsed" in meta:
+        return f" [delta: reused {meta.get('delta_reused', '?')}, reparsed {meta['delta_reparsed']}]"
+    return " [full build]"
+
+
 def _render_stats(console: Console, s: dict) -> None:
     meta = s["meta"]
+    delta = (
+        f"  [bold]delta[/] reused {meta['delta_reused']}, reparsed {meta['delta_reparsed']}"
+        if "delta_reparsed" in meta else ""
+    )
     console.print(
         f"\n[bold]repo[/] {meta.get('repo_path', '?')}  "
         f"[bold]sha[/] {(meta.get('sha') or 'live')[:8]}  "
-        f"[bold]schema[/] v{meta.get('schema_version', '?')}"
+        f"[bold]schema[/] v{meta.get('schema_version', '?')}{delta}"
     )
     console.print(
         f"[bold]files[/] {s['files_total']}  "

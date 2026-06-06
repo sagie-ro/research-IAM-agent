@@ -50,6 +50,54 @@ def build(source: RepoSource) -> Index:
     return _assemble(source.path, source.sha, parsed)
 
 
+def build_delta(source: RepoSource, old: Index) -> Index:
+    """Incremental build: reuse parsed results for files whose content hash is unchanged,
+    re-parse only changed/new files, drop deleted ones, then re-assemble. Parsing (tree-sitter)
+    is the cost; hashing + the global resolution in `_assemble` are cheap, so this skips the
+    bulk of the work on a small change. Content-hash based, so it works for shallow clones and
+    dirty worktrees, not just commit-to-commit `git diff`."""
+    sys.setrecursionlimit(20000)
+    root = source.path
+    old_files = {f.relpath: f for f in old.files}
+    old_syms: dict[str, list[SymbolRow]] = defaultdict(list)
+    for s in old.symbols:
+        old_syms[s.file_id].append(s)
+    old_edges: dict[str, list[tuple[str, str, str]]] = defaultdict(list)
+    for e in old.edges:  # raw triples (dst_id re-resolved in _assemble)
+        old_edges[e.src_id.split("::", 1)[0]].append((e.src_id, e.type, e.dst_name))
+    old_chunks: dict[str, list[DocChunkRow]] = defaultdict(list)
+    for c in old.doc_chunks:
+        old_chunks[c.file_id].append(c)
+
+    parsed: list[ParsedFile] = []
+    reused = reparsed = 0
+    for rel in source.tracked_paths():
+        on_disk = source.materialized(rel)
+        of = old_files.get(rel)
+        if of is not None and of.content_hash == _file_hash(root, rel, on_disk):
+            parsed.append(ParsedFile(of, old_syms.get(rel, []), old_edges.get(rel, []), old_chunks.get(rel, [])))
+            reused += 1
+        else:  # changed, new, or newly materialized -> re-parse
+            parsed.append(_parse_file(root, rel, on_disk))
+            reparsed += 1
+
+    index = _assemble(root, source.sha, parsed)
+    index.meta["delta_reused"] = str(reused)
+    index.meta["delta_reparsed"] = str(reparsed)
+    return index
+
+
+def _file_hash(root: Path, rel: str, on_disk: bool) -> str:
+    """Hash exactly the files `_parse_file` would read (materialized source/doc); "" otherwise,
+    matching FileRow.content_hash for inventory-only entries."""
+    if not on_disk or (profile_for(rel) is None and not _is_doc(rel)):
+        return ""
+    try:
+        return _sha((root / rel).read_bytes())
+    except Exception:
+        return ""
+
+
 def _parse_file(root: Path, rel: str, on_disk: bool) -> ParsedFile:
     profile = profile_for(rel)
     doc = _is_doc(rel)

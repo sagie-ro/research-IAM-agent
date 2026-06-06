@@ -1,8 +1,9 @@
 # Code-Q&A Agent — Project Plan (living document)
 
-**Status:** design v3.1 — locked; Inc 0–5(docs-RAG) + multi-turn chat + eval + router-brain refactor
+**Status:** design v3.1 — locked; Inc 0–6 + multi-turn chat + eval + router-brain refactor
 (locate · summarize · trace · clarify/fetch-context router · researcher delegates w/ retriever caps ·
-doc RAG, code-authoritative · eval). Next: Inc 6 delta indexing.
+doc RAG, code-authoritative · content-hash delta indexing · eval).
+Remaining: Inc 5 tail (HITL · external corpus · web search) · Inc 7 expansion · router answer-formatting.
 **Branch:** `claude/cool-curie-yyEpt`
 **Last updated:** 2026-06-06
 
@@ -207,8 +208,10 @@ CLI. Three question shapes to serve:
   Embeddings use a **separate** provider (Anthropic ships none): local code embedder by default, Azure
   ada-2 or Voyage optional; **semantic retrieval is optional** and falls back to lexical+structural if no
   embedder is configured.
-- **Caching & delta** — index persisted per (repo, SHA); on re-open, `git diff old..new` → re-parse only
-  changed files, patch the graph + re-embed changed chunks; map diff → impacted symbols/call-paths.
+- **Caching & delta** — index persisted per (repo, SHA). On rebuild, a **content-hash delta** (`build_delta`)
+  reuses parsed symbols/edges/doc-chunks for files whose hash is unchanged and re-parses only changed/new
+  ones, then re-runs the cheap global resolution + call-paths. Hash-based, so it covers shallow clones and
+  dirty worktrees, not just commit-to-commit diffs (D7). `inspect` prints `delta: reused R, reparsed P`.
 - **Tracing & Eval** — see §9.
 
 ### 4.3 Graph nodes (LangGraph)
@@ -296,7 +299,8 @@ that's expected and swappable via config when more Azure deployments exist.
 - **Inc 4 — Researcher + multi-hop Trace (Q3).** Team topology, parallel retrievers, boundary awareness.
 - **Inc 5 — RAG grounding.** ✅ **Repo-docs RAG** (heading-chunked `search_docs`, code-authoritative / D16).
   *(Deferred tail: external professional-corpus RAG, budgeted web search, HITL interrupt.)*
-- **Inc 6 — Incremental delta indexing** (content-hash delta → re-parse only changed files).
+- **Inc 6 — Incremental delta indexing.** ✅ Content-hash delta → reuse unchanged files, re-parse only
+  changes, re-assemble globally (`build_delta`); auto-used by `ensure_index` when a prior index exists.
 - **Inc 7 — Eval expansion + trace report.** *(Future: HTML report skill, HITL learning loop.)*
 
 ---
@@ -326,7 +330,9 @@ that's expected and swappable via config when more Azure deployments exist.
   **Azure OpenAI = alternate** (GPT-4o + ada-2).
 - **D5** **UV** packaging; **Python config**; secrets via `.env`.
 - **D6** **Local-first structured tracing**; LangSmith/Datadog = future.
-- **D7** Precompute **call-paths**; delta via **git-diff → impact**.
+- **D7** Precompute **call-paths**; **incremental delta = per-file content-hash** → reuse parsed results
+  for unchanged files, re-parse only changes, re-resolve globally (works for shallow clones / dirty trees,
+  not just commit diffs). Implemented Inc 6 (`build_delta`).
 - **D8** **Structured agent outputs** everywhere except the router's user-facing answer.
 - **D9** Toolbox includes **`get_references`** (usage sites of a symbol).
 - **D10** Embeddings via a **separate, pluggable provider** (Anthropic ships none): default = local code
