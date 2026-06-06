@@ -124,6 +124,13 @@ def _friendly_llm_error(exc: Exception) -> str:
             "AZURE_OPENAI_API_VERSION) and point ROUTER_MODEL / RETRIEVER_MODEL / RESEARCHER_MODEL at your "
             "Azure chat deployment name(s). Your Azure embeddings already work, so the creds are in place."
         )
+    if "deploymentnotfound" in low or ("deployment" in low and ("not exist" in low or "not found" in low)):
+        return (
+            "the Azure chat deployment wasn't found. Set ROUTER_MODEL / RETRIEVER_MODEL / RESEARCHER_MODEL "
+            "to the name of an EXISTING Azure chat deployment (not the claude-* defaults; the deployment "
+            "NAME can differ from the model id). Your ada-2 embedding deployment works, so the endpoint and "
+            "credentials are fine — only the chat deployment name is off."
+        )
     if any(s in low for s in ("authentication", "api key", "unauthorized", "401", "invalid x-api-key")):
         return "model authentication failed — check the provider keys/credentials in your .env."
     if "rate limit" in low or "429" in low or "overloaded" in low:

@@ -17,6 +17,8 @@ def test_friendly_llm_error_is_actionable():
     assert "out of credits" in billing and "azure_openai" in billing.lower()
     auth = _friendly_llm_error(Exception("authentication_error: invalid x-api-key"))
     assert "authentication failed" in auth
+    deploy = _friendly_llm_error(Exception("404 - DeploymentNotFound: The API deployment does not exist"))
+    assert "deployment" in deploy.lower() and "RESEARCHER_MODEL" in deploy
     generic = _friendly_llm_error(ValueError("boom"))
     assert "ValueError" in generic and "boom" in generic
 
