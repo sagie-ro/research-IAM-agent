@@ -49,6 +49,7 @@ class Settings(BaseSettings):
 
     # Scope-guard / abuse budgets (principle 7).
     max_question_chars: int = 4000
+    retriever_max_steps: int = 6  # tool-call budget per retriever worker
 
     def role(self, name: str) -> RoleModel:
         models = {

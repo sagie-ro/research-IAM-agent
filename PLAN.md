@@ -1,6 +1,6 @@
 # Code-Q&A Agent — Project Plan (living document)
 
-**Status:** design v3.1 — locked; ready to start Inc 0
+**Status:** design v3.1 — locked; Inc 0–3 implemented (skeleton · index · locate · summarize)
 **Branch:** `claude/cool-curie-yyEpt`
 **Last updated:** 2026-06-06
 
@@ -177,7 +177,7 @@ CLI. Three question shapes to serve:
   `search_lexical` (ripgrep) · `search_semantic` (vectors) · `get_symbol` · `find_callers` ·
   `find_callees` · **`get_references`** (all usage sites of a symbol) · `find_implementations` ·
   `get_call_path` (precomputed traces) · **`find_files`** (inventory incl. binary/asset files) ·
-  `read_file(path,range)` · `repo_overview`.
+  `read_file(path,range)` · `repo_overview` · **`structure_digest`** (whole-repo module map for summarize).
   A **context assembler** expands from seeds along graph edges to return *connected* sets (not independent
   top-k), with dedup/diversity + token budget.
 - **Agent graph (LangGraph) — works like a team:**

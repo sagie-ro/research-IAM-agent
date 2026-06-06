@@ -38,4 +38,18 @@ CASES: list[EvalCase] = [
         expect_files=["JsignCLI.java", "SignerHelper.java"],
         expect_symbols=["main"],
     ),
+    EvalCase(
+        id="signify-summary",
+        repo="https://github.com/ralphje/signify",
+        question="What does this application do?",
+        expect_symbols=["authenticode", "verif"],
+        qtype="summarize",
+    ),
+    EvalCase(
+        id="jsign-summary",
+        repo="https://github.com/ebourg/jsign",
+        question="What does this project do, at a high level?",
+        expect_symbols=["sign", "authenticode"],
+        qtype="summarize",
+    ),
 ]

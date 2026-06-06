@@ -75,6 +75,77 @@ class Toolbox:
             out += ["", "README (head):", readme]
         return "\n".join(out)
 
+    def structure_digest(self, max_modules: int = 14, max_per_module: int = 5) -> str:
+        """Structure-first digest of the WHOLE repo for overview/summary questions:
+        languages, README head, a module map (per top-level package: source files,
+        symbols, key types), and entry points with what they first call."""
+        from collections import defaultdict
+
+        con = self._con()
+        try:
+            meta = dict(con.execute("SELECT key, value FROM meta").fetchall())
+            files = con.execute("SELECT relpath, language FROM files").fetchall()
+            syms = con.execute(
+                "SELECT name, kind, file_id, is_entry, start_line, end_line FROM symbols"
+            ).fetchall()
+            entries = con.execute(
+                "SELECT id, qualname, file_id FROM symbols WHERE is_entry=1 ORDER BY file_id LIMIT 15"
+            ).fetchall()
+            callees = {}
+            for e in entries:
+                rows = con.execute(
+                    "SELECT s.qualname FROM call_paths cp JOIN symbols s ON s.id=cp.to_id "
+                    "WHERE cp.entry_id=? AND cp.depth=1 LIMIT 6",
+                    (e["id"],),
+                ).fetchall()
+                callees[e["id"]] = [r["qualname"] for r in rows]
+        finally:
+            con.close()
+
+        def top(path: str) -> str:
+            i = path.find("/")
+            return path[:i] if i > 0 else "(root)"
+
+        src_files: dict[str, int] = defaultdict(int)
+        n_syms: dict[str, int] = defaultdict(int)
+        classes: dict[str, list] = defaultdict(list)
+        n_entry: dict[str, int] = defaultdict(int)
+        langs: dict[str, int] = defaultdict(int)
+        for f in files:
+            langs[f["language"]] += 1
+            if f["language"] in ("python", "java"):
+                src_files[top(f["relpath"])] += 1
+        for s in syms:
+            m = top(s["file_id"])
+            n_syms[m] += 1
+            if s["kind"] in ("class", "interface", "enum", "record"):
+                classes[m].append((s["end_line"] - s["start_line"], s["name"]))
+            if s["is_entry"]:
+                n_entry[m] += 1
+
+        out = [
+            f"repo: {Path(meta.get('repo_path', '')).name} @ {(meta.get('sha') or 'live')[:8]}",
+            "languages: " + ", ".join(f"{k}:{v}" for k, v in sorted(langs.items(), key=lambda x: -x[1])),
+        ]
+        readme = self._read_readme()
+        if readme:
+            out += ["", "README (head):", readme]
+        out += ["", "module map (top packages by source files):"]
+        for m in sorted(src_files, key=lambda x: -src_files[x])[:max_modules]:
+            key_types = [n for _, n in sorted(classes[m], reverse=True)[:max_per_module]]
+            note = f"{src_files[m]} src files, {n_syms[m]} symbols"
+            if n_entry[m]:
+                note += f", {n_entry[m]} entry pt(s)"
+            line = f"  {m}/  — {note}"
+            if key_types:
+                line += "  · key types: " + ", ".join(key_types)
+            out.append(line)
+        out += ["", "entry points → first calls:"]
+        for e in entries[:10]:
+            cs = callees.get(e["id"], [])
+            out.append(f"  {e['file_id']} :: {e['qualname']}" + (f"  → {', '.join(cs)}" if cs else ""))
+        return "\n".join(out)[:6000]
+
     def get_symbol(self, name: str) -> str:
         """Find symbol definitions (class/method/function) by name or qualified name."""
         con = self._con()

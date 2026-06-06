@@ -18,8 +18,9 @@ __all__ = [
 class Retrieval:
     tools: list
     overview: str
+    toolbox: Toolbox
 
 
 def build_retrieval(handle: IndexHandle) -> Retrieval:
     toolbox = Toolbox(handle)
-    return Retrieval(tools=make_tools(toolbox), overview=toolbox.repo_overview())
+    return Retrieval(tools=make_tools(toolbox), overview=toolbox.repo_overview(), toolbox=toolbox)

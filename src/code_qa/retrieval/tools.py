@@ -12,6 +12,7 @@ from .toolbox import Toolbox
 
 _DESCRIPTIONS = {
     "repo_overview": "Get a high-level overview of the repository (languages, entry points, README head). Call this first when you need orientation.",
+    "structure_digest": "Get a structure-first digest of the WHOLE repo: module map, key types per package, entry points and their first calls, plus the README. Use for 'what does this app do' / overview questions.",
     "get_symbol": "Find where a class/method/function is DEFINED, by name or qualified name. Use to locate a definition.",
     "find_callers": "List call sites that invoke a given symbol. Use to find who uses something.",
     "find_callees": "List symbols a given symbol calls. Use to step forward through a flow.",
@@ -27,6 +28,7 @@ _DESCRIPTIONS = {
 def make_tools(toolbox: Toolbox) -> list:
     methods = {
         "repo_overview": toolbox.repo_overview,
+        "structure_digest": toolbox.structure_digest,
         "get_symbol": toolbox.get_symbol,
         "find_callers": toolbox.find_callers,
         "find_callees": toolbox.find_callees,
