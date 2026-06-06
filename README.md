@@ -69,12 +69,17 @@ A `chat` question with no `--repo` runs in chat-only mode (no code retrieval).
 
 ## Development
 
+Run the key-free test suite (parsing, indexer, toolbox, scope-guard, graph):
+
 ```bash
-uv sync                  # installs the dev group (pytest)
-uv run pytest            # key-free tests: parsing, indexer, toolbox, scope-guard, graph
+uv run --with pytest pytest
 ```
 
-The test suite covers the deterministic seams; the LLM-driven router/retriever paths are
+`--with pytest` runs pytest *inside* uv's project environment, which avoids `pyenv`
+(or other) shims on `PATH` shadowing a bare `pytest`. If your uv installs dev groups
+on sync, `uv sync --dev && uv run pytest` is equivalent.
+
+The suite covers the deterministic seams; the LLM-driven router/retriever paths are
 exercised manually (`chat`) or via `eval` with a key.
 
 ## Status
