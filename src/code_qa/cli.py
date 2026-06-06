@@ -164,12 +164,13 @@ def _inspect(argv: list[str]) -> int:
 
 
 def _eval(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="code-qa eval", description="Run the eval seed (needs an LLM key).")
+    parser = argparse.ArgumentParser(prog="code-qa eval", description="Run the eval suite (needs an LLM key).")
     parser.add_argument("--only", help="Run only cases whose id contains this substring.")
+    parser.add_argument("--save", default="eval_results.json", help="Write the metrics JSON here.")
     args = parser.parse_args(argv)
     from .eval.runner import run
 
-    return run(only=args.only)
+    return run(only=args.only, save=args.save)
 
 
 def _render_stats(console: Console, s: dict) -> None:

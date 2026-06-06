@@ -1,6 +1,7 @@
 # Code-Q&A Agent — Project Plan (living document)
 
-**Status:** design v3.1 — locked; Inc 0–4 implemented (skeleton · index · locate · summarize · trace)
+**Status:** design v3.1 — locked; Inc 0–4 + multi-turn chat + eval metrics (Inc 7) implemented
+(locate · summarize · trace · conversational router · recall/groundedness/judge eval)
 **Branch:** `claude/cool-curie-yyEpt`
 **Last updated:** 2026-06-06
 
