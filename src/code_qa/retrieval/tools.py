@@ -18,6 +18,7 @@ _DESCRIPTIONS = {
     "get_references": "Find all usage sites of a name across the repo. Use for 'where is X used'.",
     "find_implementations": "Find classes that extend/implement a given type. Use for interfaces/abstract bases.",
     "get_call_path": "Show the precomputed call tree from an entry point (e.g. a CLI main). Use for 'what is the flow of X'.",
+    "find_files": "List repo files by path substring, including binary/asset files (test fixtures, jars) indexed as inventory but not parsed. Use for 'what files/assets/fixtures exist'.",
     "read_file": "Read a slice of a file with line numbers. Use to confirm a finding before citing it.",
     "search_lexical": "Regex/keyword search across source files. Use when you don't have a symbol name yet (e.g. 'auth', 'password').",
 }
@@ -32,6 +33,7 @@ def make_tools(toolbox: Toolbox) -> list:
         "get_references": toolbox.get_references,
         "find_implementations": toolbox.find_implementations,
         "get_call_path": toolbox.get_call_path,
+        "find_files": toolbox.find_files,
         "read_file": toolbox.read_file,
         "search_lexical": toolbox.search_lexical,
     }

@@ -9,6 +9,7 @@ from pathlib import Path
 from ..source import RepoSource
 from . import store
 from .builder import build
+from .store import SCHEMA_VERSION
 
 
 def cache_root() -> Path:
@@ -19,7 +20,8 @@ def store_path_for(source: RepoSource) -> Path:
     slug = re.sub(r"[^A-Za-z0-9_.-]", "_", source.path.name)[:40]
     digest = hashlib.sha1(str(source.path).encode()).hexdigest()[:10]
     sha = source.sha or "live"
-    return cache_root() / f"{slug}-{digest}" / sha / "index.sqlite"
+    # Schema version in the path so a schema bump invalidates old caches.
+    return cache_root() / f"{slug}-{digest}" / sha / f"index-v{SCHEMA_VERSION}.sqlite"
 
 
 def ensure_index(source: RepoSource, rebuild: bool = False) -> tuple[Path, bool]:

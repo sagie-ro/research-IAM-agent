@@ -70,9 +70,13 @@ def _chat(argv: list[str]) -> int:
                 loc = f"{f['file']}:{f['line_start']}" + (f"-{f['line_end']}" if f.get("line_end") else "")
                 console.print(f"  [cyan]{loc}[/] {f.get('symbol') or ''} — {f.get('note', '')}")
         if args.show_trace:
-            console.print("[dim]— trace —[/]")
+            console.print("[dim]— trace (agent · event) —[/]")
             for ev in result.get("trace", []):
-                console.print(f"  [dim]{json.dumps(ev)}[/]")
+                agent = ev.get("agent", "-")
+                event = ev.get("event", "")
+                rest = {k: v for k, v in ev.items() if k not in ("agent", "event")}
+                detail = json.dumps(rest) if rest else ""
+                console.print(f"  [magenta]{agent:<12}[/] [bold]{event}[/] [dim]{detail}[/]")
 
     if args.once is not None:
         ask(args.once)

@@ -7,11 +7,13 @@ from pathlib import Path
 
 from .model import Index
 
+SCHEMA_VERSION = 2
+
 _SCHEMA = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE files (
     id TEXT PRIMARY KEY, relpath TEXT, language TEXT,
-    n_lines INTEGER, is_doc INTEGER, parse_error INTEGER
+    n_lines INTEGER, is_doc INTEGER, parse_error INTEGER, on_disk INTEGER
 );
 CREATE TABLE symbols (
     id TEXT PRIMARY KEY, file_id TEXT, kind TEXT, name TEXT, qualname TEXT,
@@ -27,6 +29,7 @@ CREATE INDEX idx_sym_file ON symbols(file_id);
 CREATE INDEX idx_edge_src ON edges(src_id);
 CREATE INDEX idx_edge_dst ON edges(dst_id);
 CREATE INDEX idx_cp_entry ON call_paths(entry_id);
+CREATE INDEX idx_files_path ON files(relpath);
 """
 
 
@@ -38,8 +41,8 @@ def write(index: Index, path: Path) -> None:
     try:
         con.executescript(_SCHEMA)
         con.executemany(
-            "INSERT INTO files VALUES (?,?,?,?,?,?)",
-            [(f.id, f.relpath, f.language, f.n_lines, int(f.is_doc), int(f.parse_error)) for f in index.files],
+            "INSERT INTO files VALUES (?,?,?,?,?,?,?)",
+            [(f.id, f.relpath, f.language, f.n_lines, int(f.is_doc), int(f.parse_error), int(f.on_disk)) for f in index.files],
         )
         con.executemany(
             "INSERT INTO symbols VALUES (?,?,?,?,?,?,?,?,?)",
@@ -63,13 +66,15 @@ def read_stats(path: Path) -> dict:
     con = sqlite3.connect(path)
     try:
         scalar = lambda q: con.execute(q).fetchone()[0]  # noqa: E731
-        stats: dict = {
+        return {
             "meta": dict(con.execute("SELECT key, value FROM meta").fetchall()),
             "files_total": scalar("SELECT COUNT(*) FROM files"),
             "files_by_lang": dict(
                 con.execute("SELECT language, COUNT(*) FROM files GROUP BY language ORDER BY 2 DESC").fetchall()
             ),
             "doc_files": scalar("SELECT COUNT(*) FROM files WHERE is_doc=1"),
+            "assets": scalar("SELECT COUNT(*) FROM files WHERE language IN ('binary','other')"),
+            "not_downloaded": scalar("SELECT COUNT(*) FROM files WHERE on_disk=0"),
             "parse_errors": scalar("SELECT COUNT(*) FROM files WHERE parse_error=1"),
             "symbols_total": scalar("SELECT COUNT(*) FROM symbols"),
             "symbols_by_kind": dict(
@@ -88,6 +93,5 @@ def read_stats(path: Path) -> dict:
             "entries_with_paths": scalar("SELECT COUNT(DISTINCT entry_id) FROM call_paths"),
             "max_call_depth": scalar("SELECT COALESCE(MAX(depth), 0) FROM call_paths"),
         }
-        return stats
     finally:
         con.close()

@@ -55,6 +55,9 @@ class Toolbox:
                 "SELECT language, COUNT(*) FROM files GROUP BY language ORDER BY 2 DESC"
             ).fetchall()
             n_sym = con.execute("SELECT COUNT(*) FROM symbols").fetchone()[0]
+            assets = con.execute(
+                "SELECT COUNT(*) FROM files WHERE language IN ('binary','other')"
+            ).fetchone()[0]
             entries = con.execute(
                 "SELECT qualname, file_id FROM symbols WHERE is_entry=1 ORDER BY file_id LIMIT 12"
             ).fetchall()
@@ -63,7 +66,7 @@ class Toolbox:
         out = [
             f"repo: {Path(meta.get('repo_path', '')).name} @ {(meta.get('sha') or 'live')[:8]}",
             "languages: " + ", ".join(f"{lang}:{c}" for lang, c in langs),
-            f"symbols: {n_sym}",
+            f"symbols: {n_sym}   assets (inventory only, not parsed): {assets}",
             "entry points:",
         ]
         out += [f"  - {r['file_id']} :: {r['qualname']}" for r in entries] or ["  (none detected)"]
@@ -171,6 +174,25 @@ class Toolbox:
             con.close()
         head = f"call-path from entry {ent['qualname']}:"
         return head + "\n" + ("\n".join(lines) if lines else "  (no outgoing resolved calls)")
+
+    def find_files(self, pattern: str) -> str:
+        """List repository files whose path contains a substring, including binary/asset
+        files indexed as inventory but not parsed."""
+        con = self._con()
+        try:
+            rows = con.execute(
+                "SELECT relpath, language, on_disk FROM files WHERE relpath LIKE ? "
+                "ORDER BY relpath LIMIT 60",
+                (f"%{pattern}%",),
+            ).fetchall()
+        finally:
+            con.close()
+        if not rows:
+            return f"no files matching '{pattern}'"
+        return f"files matching '{pattern}':\n" + "\n".join(
+            f"  {r['relpath']}  [{r['language']}{'' if r['on_disk'] else ', not-downloaded'}]"
+            for r in rows
+        )
 
     def read_file(self, path: str, start_line: int = 1, end_line: int = 200) -> str:
         """Read a slice of a repo file with line numbers (read-only)."""

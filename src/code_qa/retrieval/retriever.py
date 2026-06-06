@@ -35,7 +35,8 @@ class Findings(BaseModel):
     findings: list[Finding] = Field(default_factory=list)
 
 
-def run_retriever(model, tools, question: str, overview: str, trace: list, max_steps: int = 6) -> Findings:
+def run_retriever(model, tools, question: str, overview: str, trace: list,
+                  agent: str = "retriever", max_steps: int = 6) -> Findings:
     tool_map = {t.name: t for t in tools}
     bound = model.bind_tools(tools)
     messages = [
@@ -50,14 +51,14 @@ def run_retriever(model, tools, question: str, overview: str, trace: list, max_s
         if not calls:
             break
         for call in calls:
-            trace.append({"event": "tool_call", "name": call["name"], "args": call.get("args", {})})
+            trace.append({"agent": agent, "event": "tool_call", "name": call["name"], "args": call.get("args", {})})
             tool = tool_map.get(call["name"])
             try:
                 observation = str(tool.invoke(call["args"])) if tool else f"unknown tool {call['name']}"
             except Exception as exc:
                 observation = f"tool error: {exc}"
             observation = observation[:4000]
-            trace.append({"event": "tool_result", "name": call["name"], "chars": len(observation)})
+            trace.append({"agent": agent, "event": "tool_result", "name": call["name"], "chars": len(observation)})
             messages.append(ToolMessage(content=observation, tool_call_id=call["id"]))
 
     try:

@@ -41,6 +41,7 @@ CLI. Three question shapes to serve:
 - The three modes: locate, summarize, trace.
 - Grounded answers with `file:line` citations + corpus-boundary awareness (in-repo vs. third-party).
 - Read-only static analysis; SHA-keyed incremental index.
+- Full-tree **file inventory** (binary/asset files known by path/type; not downloaded or parsed).
 - Multi-agent orchestration with per-role model modularity (Anthropic tiers local-first; Azure alternate).
 - Eval harness + full reasoning trace.
 - Scope-guard + abuse resistance.
@@ -48,6 +49,7 @@ CLI. Three question shapes to serve:
 **Out of scope (v1)**
 - Writing / refactoring / generating code in the target; fixing its bugs.
 - **Executing or building** the target repo (or running its tests) to answer.
+- Reading or disassembling **binary file contents** (PE / reverse engineering); binaries are inventory-only.
 - Re-implementing what the targets do (we analyze jsign/signify; we don't sign/verify).
 - Languages beyond Python/Java; following into third-party dependency source; multi-repo reasoning.
 - Proving correctness / exhaustive vulnerability discovery.
@@ -174,7 +176,8 @@ CLI. Three question shapes to serve:
 - **Toolbox** (LangChain tools over the index, one `Retriever` interface):
   `search_lexical` (ripgrep) · `search_semantic` (vectors) · `get_symbol` · `find_callers` ·
   `find_callees` · **`get_references`** (all usage sites of a symbol) · `find_implementations` ·
-  `get_call_path` (precomputed traces) · `read_file(path,range)` · `repo_overview`.
+  `get_call_path` (precomputed traces) · **`find_files`** (inventory incl. binary/asset files) ·
+  `read_file(path,range)` · `repo_overview`.
   A **context assembler** expands from seeds along graph edges to return *connected* sets (not independent
   top-k), with dedup/diversity + token budget.
 - **Agent graph (LangGraph) — works like a team:**
@@ -308,6 +311,11 @@ that's expected and swappable via config when more Azure deployments exist.
   — falls back to lexical+structural when no embedder is configured.
 - **D11** Vector store stays **SQLite** (unified single-file index via `sqlite-vec`); Chroma evaluated and
   **deferred to future dev** (single-file-index vs. separate-store tradeoff).
+- **D12** Git ingestion uses a **lean clone** (shallow + blobless `--filter=blob:none` + sparse-checkout to
+  source/docs), but the index inventories the **full tree** (binary/asset files recorded as metadata via
+  `git ls-tree`). Reading binary *contents* is out of scope. Plain-clone fallback for older git.
+- **D13** Every reasoning-trace event is attributed to an **agent/instance** (e.g. `router`, `retriever#1`)
+  to keep multi-agent flows legible — important once the researcher fans out to parallel retrievers.
 
 ## 11. Assumptions log
 

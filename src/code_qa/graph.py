@@ -62,7 +62,8 @@ def build_graph(settings: Settings, factory: ModelFactory, retrieval: Retrieval 
     def scope_guard(state: GraphState) -> dict:
         decision = deterministic_guard(state["question"], settings.max_question_chars)
         out: dict = {"decision": decision.model_dump(),
-                     "trace": [{"event": "scope_guard", "allowed": decision.allowed, "reason": decision.reason}]}
+                     "trace": [{"agent": "router", "event": "scope_guard",
+                                "allowed": decision.allowed, "reason": decision.reason}]}
         if not decision.allowed:
             out["action"] = "refuse"
             out["answer"] = f"{REFUSAL} ({decision.reason})"
@@ -74,23 +75,26 @@ def build_graph(settings: Settings, factory: ModelFactory, retrieval: Retrieval 
             reply = _text(router.invoke([SystemMessage(content=ROUTER_SYSTEM),
                                          HumanMessage(content=state["question"])]).content)
             return {"action": "answer", "answer": reply,
-                    "trace": [{"event": "router_decision", "action": "answer", "reason": "no repo loaded"}]}
+                    "trace": [{"agent": "router", "event": "router_decision",
+                               "action": "answer", "reason": "no repo loaded"}]}
         route = router.with_structured_output(Route).invoke(
             [SystemMessage(content=f"{CLASSIFY_SYSTEM}\n\nOverview:\n{retrieval.overview[:1500]}"),
              HumanMessage(content=state["question"])]
         )
         out = {"action": route.action,
-               "trace": [{"event": "router_decision", "action": route.action, "reason": route.reason or ""}]}
+               "trace": [{"agent": "router", "event": "router_decision",
+                          "action": route.action, "reason": route.reason or ""}]}
         if route.action == "answer":
             out["answer"] = route.reply or "How can I help with this codebase?"
         return out
 
     def retrieve(state: GraphState) -> dict:
         events: list = []
+        instance = "retriever#1"  # router spawns one worker now; researcher will fan out to #1..#N
         findings = run_retriever(factory.get("retriever"), retrieval.tools,
-                                 state["question"], retrieval.overview, events)
+                                 state["question"], retrieval.overview, events, agent=instance)
         return {"findings": findings.model_dump(),
-                "trace": events + [{"event": "findings", "n": len(findings.findings)}]}
+                "trace": events + [{"agent": instance, "event": "findings", "n": len(findings.findings)}]}
 
     def compile_answer(state: GraphState) -> dict:
         router = factory.get("router")
@@ -98,7 +102,7 @@ def build_graph(settings: Settings, factory: ModelFactory, retrieval: Retrieval 
                    f"Retriever findings (JSON):\n{json.dumps(state['findings'], indent=2)}")
         answer = _text(router.invoke([SystemMessage(content=COMPILE_SYSTEM),
                                       HumanMessage(content=payload)]).content)
-        return {"answer": answer, "trace": [{"event": "answer", "chars": len(answer)}]}
+        return {"answer": answer, "trace": [{"agent": "router", "event": "answer", "chars": len(answer)}]}
 
     def after_guard(state: GraphState) -> str:
         return "end" if state.get("action") == "refuse" else "classify"

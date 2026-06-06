@@ -9,10 +9,11 @@ from dataclasses import dataclass
 class FileRow:
     id: str
     relpath: str
-    language: str
+    language: str  # python | java | doc | binary | other
     n_lines: int
     is_doc: bool
     parse_error: bool
+    on_disk: bool = True
 
 
 @dataclass

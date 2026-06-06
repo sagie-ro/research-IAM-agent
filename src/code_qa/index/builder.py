@@ -1,9 +1,13 @@
-"""Build the index from a RepoSource: parse files, resolve edges, precompute call-paths.
+"""Build the index from a RepoSource: inventory every file, parse source/docs,
+resolve edges, precompute call-paths.
+
+Inventory covers the FULL tree (via RepoSource.tracked_paths) so binary/asset files
+are recorded as metadata (path + type), even when their bytes were never downloaded.
+Only source/doc files that are materialized on disk are read and parsed.
 
 Resolution is hand-rolled and precision-first (Option A / D2): a call/extends/implements
-edge is linked only when its simple target name resolves unambiguously (one candidate, or
-one same-file candidate). Ambiguous targets are kept as names with no link, so we accrue
-false negatives rather than false edges. The agentic layer bridges the gaps later.
+edge is linked only when its simple target name resolves unambiguously. Ambiguous
+targets stay unlinked (false negatives, not false edges); the agentic layer bridges them.
 """
 
 from __future__ import annotations
@@ -13,7 +17,8 @@ from collections import defaultdict, deque
 from pathlib import Path
 
 from ..languages import profile_for
-from ..source import RepoSource
+from ..source import BINARY_EXT, RepoSource
+from . import store
 from .model import CallPathRow, EdgeRow, FileRow, Index, SymbolRow
 
 _DOC_SUFFIX = {".md", ".rst", ".txt", ".adoc"}
@@ -32,42 +37,45 @@ def build(source: RepoSource) -> Index:
     by_name: dict[str, list[str]] = defaultdict(list)
     parse_errors = 0
 
-    for path in source.list_files():
-        rel = str(path.relative_to(root)).replace("\\", "/")
-        doc = _is_doc(rel)
+    for rel in source.tracked_paths():
+        on_disk = source.materialized(rel)
         profile = profile_for(rel)
-        if profile is None:
-            if doc:
-                files.append(FileRow(rel, rel, "doc", _count_lines(path), True, False))
-            continue
-        try:
-            data = path.read_bytes()
-        except Exception:
-            continue
-        parsed = profile.parse(data, rel)
-        files.append(FileRow(rel, rel, parsed.language, data.count(b"\n") + 1, doc, parsed.parse_error))
-        if parsed.parse_error:
-            parse_errors += 1
+        doc = _is_doc(rel)
 
-        seen: set[str] = set()
-        for ps in parsed.symbols:
-            sid = f"{rel}::{ps.qualname}"
-            if sid in seen:
-                sid = f"{sid}@{ps.start_line}"
-            seen.add(sid)
-            symbols.append(
-                SymbolRow(sid, rel, ps.kind, ps.name, ps.qualname, None,
-                          ps.start_line, ps.end_line, ps.is_entry)
-            )
-            if ps.kind in _NAME_INDEXED:
-                by_name[ps.name].append(sid)
-        for e in parsed.edges:
-            src_id = rel if not e.src_qualname else f"{rel}::{e.src_qualname}"
-            raw_edges.append((src_id, e.type, e.dst_name))
+        if profile is not None and on_disk:
+            try:
+                data = (root / rel).read_bytes()
+            except Exception:
+                files.append(FileRow(rel, rel, "other", 0, doc, False, on_disk))
+                continue
+            parsed = profile.parse(data, rel)
+            files.append(FileRow(rel, rel, parsed.language, data.count(b"\n") + 1, doc, parsed.parse_error, True))
+            if parsed.parse_error:
+                parse_errors += 1
+            seen: set[str] = set()
+            for ps in parsed.symbols:
+                sid = f"{rel}::{ps.qualname}"
+                if sid in seen:
+                    sid = f"{sid}@{ps.start_line}"
+                seen.add(sid)
+                symbols.append(
+                    SymbolRow(sid, rel, ps.kind, ps.name, ps.qualname, None,
+                              ps.start_line, ps.end_line, ps.is_entry)
+                )
+                if ps.kind in _NAME_INDEXED:
+                    by_name[ps.name].append(sid)
+            for e in parsed.edges:
+                src_id = rel if not e.src_qualname else f"{rel}::{e.src_qualname}"
+                raw_edges.append((src_id, e.type, e.dst_name))
+        elif doc and on_disk:
+            files.append(FileRow(rel, rel, "doc", _count_lines(root / rel), True, False, True))
+        else:
+            # Inventory-only: binary/asset, or a source/doc file not materialized (sparse).
+            language = "binary" if Path(rel).suffix.lower() in BINARY_EXT else ("doc" if doc else "other")
+            files.append(FileRow(rel, rel, language, 0, doc, False, on_disk))
 
     sym_ids = {s.id for s in symbols}
 
-    # parent links from qualname nesting
     for s in symbols:
         if "." in s.qualname:
             pid = f"{s.file_id}::{s.qualname.rsplit('.', 1)[0]}"
@@ -75,7 +83,6 @@ def build(source: RepoSource) -> Index:
         else:
             s.parent_id = s.file_id
 
-    # resolution + call adjacency
     edges: list[EdgeRow] = []
     adj: dict[str, set[str]] = defaultdict(set)
     for src_id, typ, dst_name in raw_edges:
@@ -93,7 +100,6 @@ def build(source: RepoSource) -> Index:
                 adj[src_id].add(dst_id)
         edges.append(EdgeRow(src_id, typ, dst_id, dst_name))
 
-    # precomputed call-paths (bounded BFS tree from each entry)
     call_paths: list[CallPathRow] = []
     entries = [s.id for s in symbols if s.is_entry]
     for eid in entries:
@@ -116,7 +122,7 @@ def build(source: RepoSource) -> Index:
     meta = {
         "repo_path": str(root),
         "sha": source.sha or "",
-        "schema_version": "1",
+        "schema_version": str(store.SCHEMA_VERSION),
         "parse_errors": str(parse_errors),
         "n_entries": str(len(entries)),
     }
