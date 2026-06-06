@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .researcher import FlowStep, TraceReport, run_researcher
 from .retriever import Finding, Findings, run_retriever
 from .tools import make_tools
 from .toolbox import IndexHandle, Toolbox
@@ -11,6 +12,7 @@ from .toolbox import IndexHandle, Toolbox
 __all__ = [
     "Retrieval", "build_retrieval", "IndexHandle", "Toolbox",
     "make_tools", "run_retriever", "Finding", "Findings",
+    "run_researcher", "TraceReport", "FlowStep",
 ]
 
 

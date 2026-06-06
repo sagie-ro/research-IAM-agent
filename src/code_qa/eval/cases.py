@@ -52,4 +52,21 @@ CASES: list[EvalCase] = [
         expect_symbols=["sign", "authenticode"],
         qtype="summarize",
     ),
+    EvalCase(
+        id="jsign-signing-flow",
+        repo="https://github.com/ebourg/jsign",
+        question="What is the flow (classes and function calls) of executable signing, "
+                 "starting from the command-line entry point?",
+        expect_files=["JsignCLI", "SignerHelper", "AuthenticodeSigner"],
+        expect_symbols=["sign"],
+        qtype="trace",
+    ),
+    EvalCase(
+        id="signify-verify-flow",
+        repo="https://github.com/ralphje/signify",
+        question="Trace the flow of signature verification from the entry point through the layers.",
+        expect_files=["base.py", "signed_data.py", "context.py"],
+        expect_symbols=["verify"],
+        qtype="trace",
+    ),
 ]

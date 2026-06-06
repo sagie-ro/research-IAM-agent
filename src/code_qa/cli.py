@@ -76,6 +76,14 @@ def _chat(argv: list[str]) -> int:
             for f in result["findings"]["findings"]:
                 loc = f"{f['file']}:{f['line_start']}" + (f"-{f['line_end']}" if f.get("line_end") else "")
                 console.print(f"  [cyan]{loc}[/] {f.get('symbol') or ''} — {f.get('note', '')}")
+        report = result.get("report")
+        if report and report.get("steps"):
+            console.print("[dim]— flow —[/]")
+            for st in report["steps"]:
+                calls = f" → {', '.join(st.get('calls', []))}" if st.get("calls") else ""
+                console.print(f"  [cyan]{st.get('location', '')}[/] {st.get('symbol', '')}{calls}")
+            for note in report.get("boundary_notes", []):
+                console.print(f"  [yellow]boundary:[/] {note}")
         if args.show_trace:
             console.print("[dim]— trace (agent · event) —[/]")
             for ev in result.get("trace", []):

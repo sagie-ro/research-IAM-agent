@@ -1,9 +1,10 @@
-"""LangGraph: scope-guard -> router classify -> (answer | retrieve+compile | summarize).
+"""LangGraph: scope-guard -> router classify -> (answer | locate | summarize | trace).
 
-- locate  -> retriever worker (toolbox) -> router compiles a cited answer (D3).
-- summarize -> summarizer builds a structure-first digest of the whole repo and
-  synthesizes a grounded overview (doc/structure-first, per recon).
-The router is the lightweight orchestrator; workers do the heavy lifting.
+- locate    -> retriever worker -> router compiles a cited answer (D3).
+- summarize -> summarizer synthesizes a structure-first overview.
+- trace     -> researcher traces the flow (fanning out to parallel retriever workers,
+               flagging the third-party boundary) -> router compiles the cited flow.
+The router is the lightweight orchestrator and the only agent that speaks NL to the user.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from .config import Settings
 from .llm import ModelFactory
-from .retrieval import Retrieval, run_retriever
+from .retrieval import Retrieval, run_researcher, run_retriever
 from .scope_guard import deterministic_guard
 
 ROUTER_SYSTEM = """You are the conversation router of a code Q&A assistant for ONE target repository.
@@ -28,9 +29,10 @@ ROUTER_SYSTEM = """You are the conversation router of a code Q&A assistant for O
 Be concise and grounded."""
 
 CLASSIFY_SYSTEM = """Classify the user's message about a code repository into one action:
-- "locate": they ask WHERE/HOW a specific thing is implemented, or about specific code.
-- "summarize": they ask for a high-level OVERVIEW — what the application does, its
-  architecture/components, or "what is this project".
+- "locate": WHERE/HOW a specific thing is implemented, or about specific code.
+- "summarize": a high-level OVERVIEW — what the application does, its architecture/components.
+- "trace": the FLOW / sequence of calls / call chain of some operation, or "walk me through
+  how X works step by step".
 - "answer": greetings, capabilities, or general chat — answer briefly yourself.
 Stay in scope (only this repository). If action="answer", put your reply in `reply`."""
 
@@ -45,11 +47,16 @@ structure-first digest below (module map, entry points, README head). Explain:
 notably what it does NOT do — citing module/file names. Ground every claim in the digest;
 do not invent files, classes, or behavior. If the digest is thin, say what's missing."""
 
+COMPILE_TRACE_SYSTEM = """You are the router. Render the researcher's trace report into a clear,
+ordered explanation of the flow. Present the steps in order with `file:line` citations and what
+each step calls next. Include the boundary notes (where the flow leaves the repo into third-party
+libraries). Use ONLY the report; do not invent code or paths."""
+
 REFUSAL = "I can only help with questions about the target codebase, and I can't act on that request."
 
 
 class Route(BaseModel):
-    action: Literal["answer", "locate", "summarize"]
+    action: Literal["answer", "locate", "summarize", "trace"]
     reply: Optional[str] = Field(default=None)
     reason: Optional[str] = Field(default=None)
 
@@ -60,6 +67,7 @@ class GraphState(TypedDict, total=False):
     decision: dict
     action: str
     findings: dict
+    report: dict
     answer: str
     trace: Annotated[list, operator.add]
 
@@ -100,7 +108,7 @@ def build_graph(settings: Settings, factory: ModelFactory, retrieval: Retrieval 
 
     def retrieve(state: GraphState) -> dict:
         events: list = []
-        instance = "retriever#1"  # router spawns one worker now; researcher will fan out to #1..#N
+        instance = "retriever#1"
         findings = run_retriever(factory.get("retriever"), retrieval.tools, state["question"],
                                  retrieval.overview, events, agent=instance,
                                  max_steps=settings.retriever_max_steps)
@@ -125,11 +133,34 @@ def build_graph(settings: Settings, factory: ModelFactory, retrieval: Retrieval 
                 "trace": [{"agent": "summarizer", "event": "structure_digest", "chars": len(digest)},
                           {"agent": "summarizer", "event": "answer", "chars": len(answer)}]}
 
+    def research(state: GraphState) -> dict:
+        events: list = []
+        report = run_researcher(
+            factory.get("researcher"), factory.get("retriever"), retrieval,
+            state["question"], events,
+            max_steps=settings.researcher_max_steps,
+            max_parallel=settings.max_parallel_retrievers,
+            retriever_max_steps=settings.retriever_max_steps,
+        )
+        return {"report": report.model_dump(),
+                "trace": events + [{"agent": "researcher", "event": "report",
+                                    "steps": len(report.steps), "boundary": len(report.boundary_notes)}]}
+
+    def compile_trace(state: GraphState) -> dict:
+        router = factory.get("router")
+        payload = (f"Question: {state['question']}\n\n"
+                   f"Researcher trace report (JSON):\n{json.dumps(state['report'], indent=2)}")
+        answer = _text(router.invoke([SystemMessage(content=COMPILE_TRACE_SYSTEM),
+                                      HumanMessage(content=payload)]).content)
+        return {"answer": answer, "trace": [{"agent": "router", "event": "answer", "chars": len(answer)}]}
+
     def after_guard(state: GraphState) -> str:
         return "end" if state.get("action") == "refuse" else "classify"
 
     def after_classify(state: GraphState) -> str:
-        return {"locate": "retrieve", "summarize": "summarize"}.get(state["action"], "end")
+        return {"locate": "retrieve", "summarize": "summarize", "trace": "research"}.get(
+            state["action"], "end"
+        )
 
     graph = StateGraph(GraphState)
     graph.add_node("scope_guard", scope_guard)
@@ -137,13 +168,17 @@ def build_graph(settings: Settings, factory: ModelFactory, retrieval: Retrieval 
     graph.add_node("retrieve", retrieve)
     graph.add_node("compile", compile_answer)
     graph.add_node("summarize", summarize)
+    graph.add_node("research", research)
+    graph.add_node("compile_trace", compile_trace)
     graph.add_edge(START, "scope_guard")
     graph.add_conditional_edges("scope_guard", after_guard, {"classify": "classify", "end": END})
     graph.add_conditional_edges(
         "classify", after_classify,
-        {"retrieve": "retrieve", "summarize": "summarize", "end": END},
+        {"retrieve": "retrieve", "summarize": "summarize", "research": "research", "end": END},
     )
     graph.add_edge("retrieve", "compile")
     graph.add_edge("compile", END)
     graph.add_edge("summarize", END)
+    graph.add_edge("research", "compile_trace")
+    graph.add_edge("compile_trace", END)
     return graph.compile()
