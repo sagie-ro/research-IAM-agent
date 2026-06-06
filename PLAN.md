@@ -330,7 +330,9 @@ that's expected and swappable via config when more Azure deployments exist.
   All findings/reports flow **back up to the router**, which compiles the single user-facing answer.
 - **D4** Per-role model modularity via LangChain. **Local-first default = Anthropic tiers**
   (router=Haiku 4.5 · retriever=Sonnet 4.6 · researcher=Opus 4.8) to exercise true tier separation;
-  **Azure OpenAI = alternate** (GPT-4o + ada-2).
+  **Azure OpenAI = alternate** (GPT-4o + ada-2). The LLM layer resolves **(provider, role) → deployment**:
+  Anthropic keeps the per-role tier ids; **Azure maps every chat role to one `AZURE_OPENAI_MODEL_GPT4O`
+  deployment** and embeddings to `AZURE_OPENAI_MODEL_ADA2`, so switching provider needs no per-role edits.
 - **D5** **UV** packaging; **Python config**; secrets via `.env`.
 - **D6** **Local-first structured tracing**; LangSmith/Datadog = future.
 - **D7** Precompute **call-paths**; **incremental delta = per-file content-hash** → reuse parsed results

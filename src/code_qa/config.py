@@ -43,9 +43,11 @@ class Settings(BaseSettings):
     # Anthropic.
     anthropic_api_key: str | None = None
 
-    # Azure OpenAI (boilerplate AD service-principal auth).
+    # Azure OpenAI (boilerplate AD service-principal auth). One chat deployment serves every
+    # agent role; embeddings use the ada-2 deployment.
     azure_openai_endpoint: str | None = None
     azure_openai_api_version: str | None = None
+    azure_openai_model_gpt4o: str | None = None  # chat deployment (all roles when provider=azure_openai)
     azure_openai_model_ada2: str | None = None  # embedding deployment (text-embedding-ada-002)
 
     # External professional-corpus RAG (optional; a directory of reference docs).
@@ -66,11 +68,17 @@ class Settings(BaseSettings):
     max_context_fetches: int = 2  # how many times the router may fetch code before deciding
 
     def role(self, name: str) -> RoleModel:
-        models = {
-            "router": self.router_model,
-            "retriever": self.retriever_model,
-            "researcher": self.researcher_model,
-        }
-        if name not in models:
+        """Resolve (provider, deployment/model) for an agent role. Provider-aware so switching
+        providers needs no per-role edits: Anthropic uses the per-role tier ids; Azure maps every
+        chat role to the single AZURE_OPENAI_MODEL_GPT4O deployment."""
+        if name not in CHAT_ROLES:
             raise KeyError(f"Unknown role: {name!r}")
-        return RoleModel(provider=self.llm_provider, model=models[name])
+        if self.llm_provider in ("azure_openai", "azure"):
+            model = self.azure_openai_model_gpt4o or ""
+        else:
+            model = {
+                "router": self.router_model,
+                "retriever": self.retriever_model,
+                "researcher": self.researcher_model,
+            }[name]
+        return RoleModel(provider=self.llm_provider, model=model)

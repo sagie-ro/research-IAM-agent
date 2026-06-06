@@ -14,6 +14,11 @@ from .config import RoleModel, Settings
 
 def build_chat_model(role: RoleModel, settings: Settings):
     if not role.model:
+        if role.provider in ("azure_openai", "azure"):
+            raise ValueError(
+                "No Azure chat deployment configured. Set AZURE_OPENAI_MODEL_GPT4O in your .env to your "
+                "GPT-4o (chat) deployment name — every agent role uses it."
+            )
         raise ValueError(
             "No model configured for this role. Set ROUTER_MODEL / RETRIEVER_MODEL / "
             "RESEARCHER_MODEL in your .env (see .env.example, PLAN.md section 7)."
