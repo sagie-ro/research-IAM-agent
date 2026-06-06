@@ -74,8 +74,12 @@ def _chat(argv: list[str]) -> int:
     app = build_graph(settings, factory, retrieval)
     history: list[dict] = []
 
-    def ask(question: str) -> None:
-        result = app.invoke({"question": question, "history": history, "trace": []})
+    def ask(question: str) -> bool:
+        try:
+            result = app.invoke({"question": question, "history": history, "trace": []})
+        except Exception as exc:  # an LLM/network error shouldn't kill the session
+            console.print(f"[red]error:[/] {_friendly_llm_error(exc)}")
+            return False
         answer = result.get("answer", "")
         console.print(answer)
         _render_evidence(console, result)
@@ -85,10 +89,10 @@ def _chat(argv: list[str]) -> int:
         history.append({"role": "assistant", "content": answer})
         if len(history) > _HISTORY_TURNS:
             del history[: len(history) - _HISTORY_TURNS]
+        return True
 
     if args.once is not None:
-        ask(args.once)
-        return 0
+        return 0 if ask(args.once) else 1
 
     console.print("[bold]code-qa[/] — conversational. Ask follow-ups; [cyan]/reset[/] clears, [cyan]/exit[/] quits.")
     while True:
@@ -107,6 +111,24 @@ def _chat(argv: list[str]) -> int:
             console.print("[dim](conversation reset)[/]")
             continue
         ask(question)
+
+
+def _friendly_llm_error(exc: Exception) -> str:
+    """Turn a provider exception into a short, actionable message (keeps the REPL alive)."""
+    msg = str(exc)
+    low = msg.lower()
+    if "credit balance is too low" in low or "billing" in low or "quota" in low:
+        return (
+            "the chat model's account is out of credits/quota. Add credits for the configured provider, "
+            "or switch chat to Azure: set LLM_PROVIDER=azure_openai (+ AZURE_OPENAI_ENDPOINT / "
+            "AZURE_OPENAI_API_VERSION) and point ROUTER_MODEL / RETRIEVER_MODEL / RESEARCHER_MODEL at your "
+            "Azure chat deployment name(s). Your Azure embeddings already work, so the creds are in place."
+        )
+    if any(s in low for s in ("authentication", "api key", "unauthorized", "401", "invalid x-api-key")):
+        return "model authentication failed — check the provider keys/credentials in your .env."
+    if "rate limit" in low or "429" in low or "overloaded" in low:
+        return "the model is rate-limiting/overloaded; wait a moment and retry."
+    return f"{type(exc).__name__}: {msg[:300]}"
 
 
 def _render_evidence(console: Console, result: dict) -> None:

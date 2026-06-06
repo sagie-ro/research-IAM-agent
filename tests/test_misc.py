@@ -10,6 +10,17 @@ def test_cli_bad_repo_path_exits_cleanly():
     assert main(["inspect", "--repo", "/no/such/dir/xyz"]) == 1
 
 
+def test_friendly_llm_error_is_actionable():
+    from code_qa.cli import _friendly_llm_error
+
+    billing = _friendly_llm_error(Exception("Your credit balance is too low to access the Anthropic API"))
+    assert "out of credits" in billing and "azure_openai" in billing.lower()
+    auth = _friendly_llm_error(Exception("authentication_error: invalid x-api-key"))
+    assert "authentication failed" in auth
+    generic = _friendly_llm_error(ValueError("boom"))
+    assert "ValueError" in generic and "boom" in generic
+
+
 def test_eval_score_recall():
     findings = {"summary": "verification in signed_data.py", "findings": [
         {"file": "a/signed_data.py", "symbol": "verify", "line_start": 1, "line_end": 2}]}
